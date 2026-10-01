@@ -1,0 +1,643 @@
+{
+  "artifacts": [
+    {
+      "bbox": [
+        56.69,
+        27.67,
+        182.95,
+        35.67
+      ],
+      "kind": "header",
+      "page": 1,
+      "text": "Sample Report - Converter Fixtures"
+    },
+    {
+      "bbox": [
+        295.41,
+        807.2,
+        299.86,
+        815.2
+      ],
+      "kind": "page_number",
+      "page": 1,
+      "text": "1"
+    },
+    {
+      "bbox": [
+        56.69,
+        27.67,
+        182.95,
+        35.67
+      ],
+      "kind": "header",
+      "page": 2,
+      "text": "Sample Report - Converter Fixtures"
+    },
+    {
+      "bbox": [
+        295.41,
+        807.2,
+        299.86,
+        815.2
+      ],
+      "kind": "page_number",
+      "page": 2,
+      "text": "2"
+    }
+  ],
+  "body": [
+    {
+      "bbox": [
+        76.87,
+        72.5,
+        300.21,
+        92.5
+      ],
+      "id": "b1",
+      "level": 1,
+      "page": 1,
+      "para": {
+        "align": "left"
+      },
+      "runs": [
+        {
+          "text": "Converting PDF to XML"
+        }
+      ],
+      "style": "h1",
+      "type": "heading"
+    },
+    {
+      "bbox": [
+        76.87,
+        105.26,
+        174.1,
+        119.26
+      ],
+      "id": "b2",
+      "level": 2,
+      "page": 1,
+      "para": {
+        "align": "left",
+        "space_before": 12.8
+      },
+      "runs": [
+        {
+          "text": "1. Introduction"
+        }
+      ],
+      "style": "h2",
+      "type": "heading"
+    },
+    {
+      "bbox": [
+        76.87,
+        127.64,
+        518.41,
+        178.64
+      ],
+      "id": "b3",
+      "page": 1,
+      "para": {
+        "align": "justify",
+        "line_height": 1.29,
+        "space_before": 8.4
+      },
+      "runs": [
+        {
+          "text": "Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read. This sentence has "
+        },
+        {
+          "bold": true,
+          "text": "bold words"
+        },
+        {
+          "text": ", "
+        },
+        {
+          "italic": true,
+          "text": "italic words "
+        },
+        {
+          "text": "and a "
+        },
+        {
+          "color": "#c00000",
+          "text": "red warning"
+        },
+        {
+          "text": ". Water is H"
+        },
+        {
+          "sub": true,
+          "text": "2"
+        },
+        {
+          "text": "O and energy is E = mc"
+        },
+        {
+          "sup": true,
+          "text": "2"
+        },
+        {
+          "text": "."
+        }
+      ],
+      "style": "body",
+      "type": "paragraph"
+    },
+    {
+      "bbox": [
+        76.87,
+        187.64,
+        518.41,
+        265.64
+      ],
+      "id": "b4",
+      "page": 1,
+      "para": {
+        "align": "justify",
+        "line_height": 1.29,
+        "space_before": 9.0
+      },
+      "runs": [
+        {
+          "text": "Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read. Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read."
+        }
+      ],
+      "style": "body",
+      "type": "paragraph"
+    },
+    {
+      "bbox": [
+        76.87,
+        276.74,
+        128.01,
+        288.24
+      ],
+      "id": "b5",
+      "level": 3,
+      "page": 1,
+      "para": {
+        "align": "left",
+        "space_before": 11.1
+      },
+      "runs": [
+        {
+          "text": "1.1 Goals"
+        }
+      ],
+      "style": "h3",
+      "type": "heading"
+    },
+    {
+      "bbox": [
+        74.87,
+        294.85,
+        281.64,
+        345.85
+      ],
+      "id": "b6",
+      "items": [
+        {
+          "bbox": [
+            74.87,
+            294.85,
+            249.51,
+            306.85
+          ],
+          "children": [],
+          "id": "b7",
+          "marker": "(cid:127)",
+          "page": 1,
+          "para": {
+            "align": "left",
+            "space_before": 6.6
+          },
+          "runs": [
+            {
+              "text": "Keep every character of the text layer."
+            }
+          ],
+          "style": "body",
+          "type": "list_item"
+        },
+        {
+          "bbox": [
+            74.87,
+            314.35,
+            281.64,
+            326.35
+          ],
+          "children": [],
+          "id": "b8",
+          "marker": "(cid:127)",
+          "page": 1,
+          "para": {
+            "align": "left",
+            "space_before": 7.5
+          },
+          "runs": [
+            {
+              "text": "Keep styles: font, size, colour, bold and italic."
+            }
+          ],
+          "style": "body",
+          "type": "list_item"
+        },
+        {
+          "bbox": [
+            74.87,
+            333.85,
+            257.73,
+            345.85
+          ],
+          "children": [],
+          "id": "b9",
+          "marker": "(cid:127)",
+          "page": 1,
+          "para": {
+            "align": "left",
+            "space_before": 7.5
+          },
+          "runs": [
+            {
+              "text": "Produce valid XML, EPUB and DOCX."
+            }
+          ],
+          "style": "body",
+          "type": "list_item"
+        }
+      ],
+      "ordered": false,
+      "page": 1,
+      "type": "list"
+    },
+    {
+      "bbox": [
+        76.87,
+        357.76,
+        142.2,
+        371.76
+      ],
+      "id": "b10",
+      "level": 2,
+      "page": 1,
+      "para": {
+        "align": "left",
+        "space_before": 11.9
+      },
+      "runs": [
+        {
+          "text": "2. Method"
+        }
+      ],
+      "style": "h2",
+      "type": "heading"
+    },
+    {
+      "bbox": [
+        76.87,
+        380.14,
+        518.41,
+        485.14
+      ],
+      "id": "b11",
+      "page": 1,
+      "para": {
+        "align": "justify",
+        "line_height": 1.29,
+        "space_before": 8.4
+      },
+      "runs": [
+        {
+          "text": "Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read. Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read. Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read."
+        }
+      ],
+      "style": "body",
+      "type": "paragraph"
+    },
+    {
+      "bbox": [
+        76.87,
+        494.35,
+        229.62,
+        545.35
+      ],
+      "id": "b12",
+      "items": [
+        {
+          "bbox": [
+            76.87,
+            494.35,
+            223.81,
+            506.35
+          ],
+          "children": [],
+          "id": "b13",
+          "marker": "1.",
+          "page": 1,
+          "para": {
+            "align": "left",
+            "space_before": 9.2
+          },
+          "runs": [
+            {
+              "text": "Extract words with their styles."
+            }
+          ],
+          "style": "body",
+          "type": "list_item"
+        },
+        {
+          "bbox": [
+            76.87,
+            513.85,
+            229.62,
+            525.85
+          ],
+          "children": [],
+          "id": "b14",
+          "marker": "2.",
+          "page": 1,
+          "para": {
+            "align": "left",
+            "space_before": 7.5
+          },
+          "runs": [
+            {
+              "text": "Detect blocks and reading order."
+            }
+          ],
+          "style": "body",
+          "type": "list_item"
+        },
+        {
+          "bbox": [
+            76.87,
+            533.35,
+            221.48,
+            545.35
+          ],
+          "children": [],
+          "id": "b15",
+          "marker": "3.",
+          "page": 1,
+          "para": {
+            "align": "left",
+            "space_before": 7.5
+          },
+          "runs": [
+            {
+              "text": "Merge both layers by position."
+            }
+          ],
+          "style": "body",
+          "type": "list_item"
+        }
+      ],
+      "ordered": true,
+      "page": 1,
+      "type": "list"
+    },
+    {
+      "bbox": [
+        127.56,
+        550.36,
+        467.72,
+        720.44
+      ],
+      "caption_ref": "b17",
+      "id": "b16",
+      "image": "assets/p1_b16.png",
+      "page": 1,
+      "type": "figure"
+    },
+    {
+      "bbox": [
+        232.02,
+        722.39,
+        363.26,
+        731.39
+      ],
+      "id": "b17",
+      "page": 1,
+      "para": {
+        "align": "center",
+        "space_before": 1.9
+      },
+      "runs": [
+        {
+          "text": "Figure 1. Characters kept per stage."
+        }
+      ],
+      "style": "caption",
+      "target": "b16",
+      "type": "caption"
+    },
+    {
+      "bbox": [
+        76.87,
+        741.72,
+        518.41,
+        765.72
+      ],
+      "id": "b18",
+      "page": 1,
+      "para": {
+        "align": "left",
+        "line_height": 1.29,
+        "space_before": 10.3
+      },
+      "runs": [
+        {
+          "text": "Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a"
+        }
+      ],
+      "style": "body",
+      "type": "paragraph"
+    },
+    {
+      "bbox": [
+        76.87,
+        70.64,
+        518.41,
+        189.14
+      ],
+      "id": "b19",
+      "page": 2,
+      "para": {
+        "align": "justify",
+        "line_height": 1.29
+      },
+      "runs": [
+        {
+          "text": "heading starts, and in which order the columns are read. Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read. Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read. Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read."
+        }
+      ],
+      "style": "body",
+      "type": "paragraph"
+    },
+    {
+      "bbox": [
+        76.87,
+        202.76,
+        143.0,
+        216.76
+      ],
+      "id": "b20",
+      "level": 2,
+      "page": 2,
+      "para": {
+        "align": "left",
+        "space_before": 13.6
+      },
+      "runs": [
+        {
+          "text": "3. Results"
+        }
+      ],
+      "style": "h2",
+      "type": "heading"
+    },
+    {
+      "bbox": [
+        76.87,
+        225.14,
+        518.41,
+        397.64
+      ],
+      "id": "b21",
+      "page": 2,
+      "para": {
+        "align": "justify",
+        "line_height": 1.29,
+        "space_before": 8.4
+      },
+      "runs": [
+        {
+          "text": "Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read. Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read. Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read. Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read. Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read."
+        }
+      ],
+      "style": "body",
+      "type": "paragraph"
+    },
+    {
+      "bbox": [
+        76.87,
+        406.64,
+        518.41,
+        579.14
+      ],
+      "id": "b22",
+      "page": 2,
+      "para": {
+        "align": "justify",
+        "line_height": 1.29,
+        "space_before": 9.0
+      },
+      "runs": [
+        {
+          "text": "Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read. Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read. Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read. Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read. Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read."
+        }
+      ],
+      "style": "body",
+      "type": "paragraph"
+    }
+  ],
+  "footnotes": [],
+  "meta": {
+    "doc_type": "generic",
+    "engine": "heuristic",
+    "lang": "en",
+    "pages": 2,
+    "schema_version": "1",
+    "sha256": "0e7a2d62cb336655e135e04f8f50c448a541b451e677f5a771fcedfcfe804544",
+    "source": "simple.pdf",
+    "stats": {
+      "artifacts": 4,
+      "dehyphenated": 0,
+      "orphan_words": 0,
+      "promoted_headings": 0
+    },
+    "style_backend": "pdfplumber",
+    "tagged": false,
+    "title": "Converting PDF to XML",
+    "warnings": [
+      "3 glyph(s) have no Unicode mapping and appear as (cid:N); lone ones at the start of list items are treated as bullets"
+    ]
+  },
+  "pages": [
+    {
+      "height": 841.89,
+      "n": 1,
+      "width": 595.28
+    },
+    {
+      "height": 841.89,
+      "n": 2,
+      "width": 595.28
+    }
+  ],
+  "references": [],
+  "styles": {
+    "body": {
+      "bold": false,
+      "char_count": 4611,
+      "color": "#000000",
+      "font": "Times New Roman",
+      "generic": "serif",
+      "italic": false,
+      "role": "body",
+      "size": 10.5,
+      "small_caps": false
+    },
+    "caption": {
+      "bold": false,
+      "char_count": 31,
+      "color": "#000000",
+      "font": "Times New Roman",
+      "generic": "serif",
+      "italic": true,
+      "role": "caption",
+      "size": 9.0,
+      "small_caps": false
+    },
+    "h1": {
+      "bold": true,
+      "char_count": 18,
+      "color": "#1a3c6e",
+      "font": "Arial",
+      "generic": "sans-serif",
+      "italic": false,
+      "level": 1,
+      "role": "heading",
+      "size": 20.0,
+      "small_caps": false
+    },
+    "h2": {
+      "bold": true,
+      "char_count": 31,
+      "color": "#1a3c6e",
+      "font": "Arial",
+      "generic": "sans-serif",
+      "italic": false,
+      "level": 2,
+      "role": "heading",
+      "size": 14.0,
+      "small_caps": false
+    },
+    "h3": {
+      "bold": true,
+      "char_count": 8,
+      "color": "#000000",
+      "font": "Arial",
+      "generic": "sans-serif",
+      "italic": true,
+      "level": 3,
+      "role": "heading",
+      "size": 11.5,
+      "small_caps": false
+    }
+  }
+}

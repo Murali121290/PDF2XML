@@ -1,0 +1,13 @@
+# JATS 1.4 Journal Publishing ("Blue"). This tag set requires journal metadata: give at least
+# journal.id and one ISSN in the metadata file, or the export is reported as invalid.
+name: jats-publishing
+
+jats:
+  tag_set: publishing           # archiving | publishing | authoring
+  version: "1.4"
+  doctype: official
+  article_type: research-article
+
+citation_links: auto
+queries:
+  mode: drop

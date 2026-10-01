@@ -1,0 +1,196 @@
+/* Proof view for jats-preview.xsl. Edit freely: the preview reloads when this file changes. */
+
+:root {
+  --paper: #ffffff;
+  --desk: #eef0f3;
+  --ink: #1d232b;
+  --muted: #6a7380;
+  --rule: #d9dde3;
+  --accent: #2f5fb3;
+  --xref: #1b6e4f;
+  --warn: #b3261e;
+  --page: #7a4fb5;
+  --query: #9a6400;
+}
+
+html { background: var(--desk); }
+body.pv-doc {
+  margin: 0 auto;
+  padding: 2.5rem 3rem 5rem;
+  max-width: 50rem;
+  background: var(--paper);
+  color: var(--ink);
+  font: 16px/1.6 Georgia, "Times New Roman", serif;
+  box-shadow: 0 0 0 1px var(--rule);
+  min-height: 100vh;
+  box-sizing: border-box;
+}
+
+h1, h2, h3, h4, h5, h6 { font-family: "Segoe UI", system-ui, sans-serif; line-height: 1.25; }
+h1 { font-size: 1.9rem; margin: 0 0 .5rem; }
+h2 { font-size: 1.4rem; margin: 2rem 0 .6rem; }
+h3 { font-size: 1.15rem; margin: 1.6rem 0 .5rem; }
+h4, h5, h6 { font-size: 1rem; margin: 1.2rem 0 .4rem; }
+p { margin: 0 0 .8rem; }
+
+.pv-label { color: var(--accent); font-weight: 600; }
+.pv-note { font: 12px/1.4 "Segoe UI", system-ui, sans-serif; color: var(--muted); }
+.pv-subtitle { font-size: 1.15rem; color: var(--muted); margin-top: 0; }
+.pv-contribs { font-style: italic; }
+.pv-pubinfo { font: 13px/1.5 "Segoe UI", system-ui, sans-serif; color: var(--muted); }
+.pv-part-meta { border-bottom: 2px solid var(--ink); margin-bottom: 1.5rem; padding-bottom: .5rem; }
+.pv-abstract { background: #f6f7f9; padding: .6rem 1rem; border-left: 3px solid var(--accent); }
+.pv-abstract h2 { margin-top: .3rem; font-size: 1.05rem; }
+.pv-kwds { font-size: .95rem; }
+.pv-part + .pv-part { border-top: 1px dashed var(--rule); margin-top: 2rem; padding-top: 1rem; }
+
+details.pv-meta {
+  font: 13px/1.5 "Segoe UI", system-ui, sans-serif;
+  background: #f6f7f9; border: 1px solid var(--rule); border-radius: 6px;
+  padding: .4rem .8rem; margin-bottom: 1.5rem;
+}
+details.pv-meta summary { cursor: pointer; color: var(--muted); }
+details.pv-meta dl { display: grid; grid-template-columns: max-content 1fr; gap: .15rem 1rem; }
+details.pv-meta dt { color: var(--muted); }
+details.pv-meta dd { margin: 0; }
+.pv-attr { color: #8a93a0; font-size: 11px; }
+
+/* lists */
+.pv-list { padding-left: 1.6rem; margin: 0 0 .8rem; }
+.pv-list li > p { margin: 0 0 .25rem; }
+.pv-list-alpha-lower { list-style: lower-alpha; }
+.pv-list-alpha-upper { list-style: upper-alpha; }
+.pv-list-roman-lower { list-style: lower-roman; }
+.pv-list-roman-upper { list-style: upper-roman; }
+.pv-list-simple { list-style: none; }
+.pv-list ul, .pv-list ol { margin-top: .2rem; }
+.pv-item-label { margin-right: .4rem; }
+
+/* boxes: one colour per content-type */
+.pv-box {
+  --box: #7d8794;
+  border: 1px solid var(--box); border-left-width: 5px; border-radius: 4px;
+  background: color-mix(in srgb, var(--box) 7%, white);
+  padding: .5rem 1rem .3rem; margin: 1.2rem 0;
+}
+.pv-box-head { font: 600 15px/1.4 "Segoe UI", system-ui, sans-serif; margin-bottom: .4rem; }
+.pv-box-type {
+  display: inline-block; font: 600 10px/1 "Segoe UI", system-ui, sans-serif;
+  text-transform: uppercase; letter-spacing: .06em; color: white; background: var(--box);
+  padding: 3px 6px; border-radius: 3px; margin-right: .5rem; vertical-align: 2px;
+}
+.pv-box-tip { --box: #2e8b57; }
+.pv-box-example { --box: #2f5fb3; }
+.pv-box-warning { --box: #c0392b; }
+.pv-box-note { --box: #8e6c00; }
+.pv-box-key-point { --box: #7a4fb5; }
+.pv-box-exercise { --box: #d35400; }
+.pv-box-definition { --box: #16808a; }
+.pv-box-sidebar, .pv-box-box { --box: #5f6b7a; }
+
+/* floats */
+figure { margin: 1.4rem 0; }
+figcaption { font: 14px/1.45 "Segoe UI", system-ui, sans-serif; margin: .4rem 0; }
+.pv-fig img { max-width: 100%; border: 1px solid var(--rule); }
+.pv-table-scroll { overflow-x: auto; }
+table { border-collapse: collapse; font: 13px/1.4 "Segoe UI", system-ui, sans-serif; width: 100%; }
+th, td { border: 1px solid var(--rule); padding: .3rem .5rem; vertical-align: top; text-align: left; }
+thead th { background: #f0f2f5; }
+.pv-table-foot, .pv-attrib { font-size: 13px; color: var(--muted); margin-top: .3rem; }
+blockquote { margin: 1rem 2rem; font-style: italic; }
+.pv-code { background: #f6f7f9; padding: .6rem; overflow-x: auto; font-size: 13px; }
+.pv-formula { text-align: center; margin: 1rem 0; }
+.pv-sc { font-variant: small-caps; }
+
+/* links */
+a.pv-xref { color: var(--xref); text-decoration: none; border-bottom: 1px dotted var(--xref); }
+a.pv-xref-bibr { background: #e9f5ef; }
+a.pv-ext { color: var(--accent); word-break: break-all; }
+a.pv-broken { color: var(--warn); border-bottom: 2px solid var(--warn); background: #fdecea; }
+
+/* page markers: a pill at the exact point the page turns */
+.pv-page {
+  display: inline-block; font: 600 10px/1 "Segoe UI", system-ui, sans-serif;
+  color: white; background: var(--page); border-radius: 8px; padding: 2px 6px;
+  margin: 0 3px; vertical-align: 2px; cursor: pointer; user-select: none;
+}
+.pv-page::before { content: "p. "; font-weight: 400; }
+
+/* author queries kept in the output */
+.pv-query {
+  font: 12px/1.4 "Segoe UI", system-ui, sans-serif; color: var(--query);
+  background: #fff4dc; border: 1px dashed var(--query); padding: 0 4px; border-radius: 3px;
+}
+.pv-query::before { content: "AQ "; font-weight: 700; }
+
+/* references */
+.pv-refs .pv-ref { margin: 0 0 .55rem; padding-left: 2.4rem; text-indent: -2.4rem; font-size: .95rem; }
+.pv-ref-id {
+  display: inline-block; min-width: 2rem; font: 11px/1 "Segoe UI", system-ui, sans-serif;
+  color: var(--muted); text-indent: 0;
+}
+.pv-cited { font: 10px/1 "Segoe UI", system-ui, sans-serif; color: var(--muted); margin-left: .4rem; }
+.pv-uncited { color: var(--warn); font-weight: 700; }
+.pv-fns { border-top: 1px solid var(--rule); margin-top: 2rem; font-size: .92rem; }
+
+/* printed contents, glossary, index */
+.pv-toc { background: #f6f7f9; padding: .4rem 1.2rem .8rem; margin: 1rem 0; }
+.pv-toc ol { list-style: none; padding-left: 1.4rem; margin: .2rem 0; }
+.pv-toc > ol { padding-left: 0; }
+.pv-toc-entry { margin: .25rem 0; }
+.pv-toc-entry .pv-contribs { display: inline; margin-left: .5rem; font-size: .9rem; }
+.pv-toc-page { float: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+.pv-toc-link.pv-broken { color: var(--warn); text-decoration: underline wavy; }
+.pv-def-list dt { font-weight: 600; margin-top: .5rem; }
+.pv-def-list dd { margin: 0 0 0 1.5rem; }
+.pv-def-list dd p { margin: .1rem 0; }
+.pv-index { columns: 2; column-gap: 2rem; font-size: .92rem; }
+.pv-index h2, .pv-index-div h3 { column-span: all; }
+.pv-index-entry { padding-left: 1.2rem; text-indent: -1.2rem; }
+.pv-index-entry .pv-index-entry { padding-left: 2.2rem; }
+.pv-nav { font-variant-numeric: tabular-nums; }
+.pv-nav.pv-broken { color: var(--warn); }
+
+/* anything the sheet has no rule for */
+.pv-unknown { outline: 2px dashed var(--warn); outline-offset: 1px; }
+.pv-unknown::before {
+  content: "<" attr(data-tag) ">"; font: 10px/1 ui-monospace, Consolas, monospace;
+  color: var(--warn); margin-right: 2px;
+}
+
+/* ---------------------------------------------------------------- checking modes */
+
+/* "Tags": outline block elements and print their XML names */
+.pv-show-tags :is(section, aside, figure, p, li, ol, ul, blockquote, header, .pv-ref,
+                  h1, h2, h3, h4, h5, h6)[data-tag] {
+  outline: 1px solid #b9c6dc; outline-offset: 2px; position: relative;
+}
+.pv-show-tags :is(section, aside, figure, p, li, ol, ul, blockquote, header, .pv-ref,
+                  h1, h2, h3, h4, h5, h6)[data-tag]::after {
+  content: attr(data-tag); position: absolute; top: -9px; right: 0;
+  font: 9px/1 ui-monospace, Consolas, monospace; color: #4a6aa5;
+  background: #eef3fb; padding: 1px 3px; border-radius: 2px; text-indent: 0;
+  font-style: normal; font-weight: 400; pointer-events: none;
+}
+.pv-show-tags :is(b, i, u, s, sup, sub, code, a, span.pv-sc)[data-tag] { background: #fff6c8; }
+
+/* "Citation parts": colour the granular elements inside mixed-citation */
+.pv-show-cite .pv-c { border-radius: 2px; padding: 0 1px; }
+.pv-show-cite .pv-c-person-group { background: #eef2ff; }
+.pv-show-cite .pv-c-surname { background: #c9d7ff; }
+.pv-show-cite .pv-c-given-names { background: #dde6ff; }
+.pv-show-cite .pv-c-collab { background: #c9d7ff; }
+.pv-show-cite .pv-c-etal, .pv-show-cite .pv-c-role { background: #e6e0ff; }
+.pv-show-cite .pv-c-year, .pv-show-cite .pv-c-month, .pv-show-cite .pv-c-day { background: #ffe0b5; }
+.pv-show-cite .pv-c-article-title, .pv-show-cite .pv-c-chapter-title { background: #d8f3dc; }
+.pv-show-cite .pv-c-source { background: #b7e4c7; font-style: italic; }
+.pv-show-cite .pv-c-volume, .pv-show-cite .pv-c-issue { background: #fde2e4; }
+.pv-show-cite .pv-c-fpage, .pv-show-cite .pv-c-lpage,
+.pv-show-cite .pv-c-elocation-id { background: #fad2e1; }
+.pv-show-cite .pv-c-edition, .pv-show-cite .pv-c-publisher-name,
+.pv-show-cite .pv-c-publisher-loc { background: #e2ece9; }
+.pv-show-cite .pv-c-pub-id { background: #cdeffa; }
+.pv-show-cite .pv-citation { outline: 1px solid #e3e6ea; }
+
+/* the element picked in the preview */
+.pv-picked { outline: 2px solid #f0a500 !important; outline-offset: 2px; }

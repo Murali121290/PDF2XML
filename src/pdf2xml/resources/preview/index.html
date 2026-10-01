@@ -1,0 +1,561 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pdf2xml preview</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --ink: #1d232b; --muted: #687280; --line: #dde1e6;
+    --accent: #2f5fb3; --ok: #1f7a4d; --bad: #b3261e; --warn: #9a6400; --pick: #f0a500;
+    --mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { font: 13px/1.4 "Segoe UI", system-ui, sans-serif; color: var(--ink); background: var(--bg);
+         display: grid; grid-template-rows: auto 1fr auto; }
+
+  /* ---------------------------------------------------------------- top bar */
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 8px 12px;
+           background: var(--panel); border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 14px; margin: 0 6px 0 0; letter-spacing: .02em; }
+  header h1 span { color: var(--muted); font-weight: 400; }
+  label.field { display: flex; align-items: center; gap: 5px; color: var(--muted); }
+  select { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 5px;
+           background: white; color: var(--ink); max-width: 210px; }
+  #file { max-width: 150px; }
+  .toggles { display: flex; gap: 4px; }
+  .toggle { display: inline-flex; align-items: center; gap: 4px; padding: 4px 9px; cursor: pointer;
+            border: 1px solid var(--line); border-radius: 14px; background: white; user-select: none; }
+  .toggle input { margin: 0; }
+  .toggle:has(input:checked) { background: #e8eefa; border-color: #b8c8ea; color: var(--accent); }
+  .spacer { flex: 1; }
+  .chip { padding: 4px 10px; border-radius: 12px; font-weight: 600; cursor: pointer; white-space: nowrap;
+          background: #eceef1; color: var(--muted); border: 0; font: inherit; font-weight: 600; }
+  .chip.ok { background: #e3f3ea; color: var(--ok); }
+  .chip.bad { background: #fdecea; color: var(--bad); }
+  .live { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #c3c8cf; }
+  .dot.on { background: #2fb36b; box-shadow: 0 0 0 3px #2fb36b22; }
+  .dot.flash { background: var(--pick); }
+
+  /* ---------------------------------------------------------------- panes */
+  /* XML / page / checks panel on the left, preview on the right */
+  main { display: grid; grid-template-columns: var(--side, 46%) 6px 1fr; min-height: 0; }
+  main.noside { grid-template-columns: 0 0 1fr; }
+  main.noside #side, main.noside #drag { display: none; }
+  #view { position: relative; min-width: 0; }
+  #view iframe { border: 0; width: 100%; height: 100%; background: #eef0f3; display: block; }
+  #busy { position: absolute; top: 8px; right: 14px; font-size: 11px; color: var(--muted);
+          background: #ffffffd8; padding: 2px 8px; border-radius: 10px; display: none; }
+  #drag { cursor: col-resize; background: var(--line); }
+  #drag:hover { background: #b8c8ea; }
+  #side { display: grid; grid-template-rows: auto 1fr; min-width: 0; min-height: 0;
+          background: var(--panel); }
+  .tabs { display: flex; border-bottom: 1px solid var(--line); padding: 0 6px; }
+  .tabs button { font: inherit; border: 0; background: none; padding: 8px 12px; cursor: pointer;
+                 color: var(--muted); border-bottom: 2px solid transparent; }
+  .tabs button.active { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+  .tabs .count { background: var(--bad); color: white; border-radius: 8px; padding: 0 5px;
+                 font-size: 10px; margin-left: 4px; }
+  .pane { overflow: auto; min-height: 0; display: none; }
+  .pane.active { display: block; }
+
+  /* source */
+  #srcbar { position: sticky; top: 0; display: flex; gap: 6px; align-items: center; padding: 6px 8px;
+            background: #fafbfc; border-bottom: 1px solid var(--line); z-index: 1; }
+  #srcbar input { flex: 1; font: inherit; padding: 3px 6px; border: 1px solid var(--line); border-radius: 4px; }
+  #srcbar button, .btn { font: inherit; padding: 3px 9px; border: 1px solid var(--line); border-radius: 4px;
+                         background: white; cursor: pointer; }
+  #src { font: 12px/1.55 var(--mono); padding: 4px 0 40px; counter-reset: ln; }
+  #src .l { display: grid; grid-template-columns: 4.2em 1fr; }
+  #src .l code { font: inherit; white-space: pre-wrap; word-break: break-all; min-width: 0; }
+  #src .l::before { content: attr(data-n); color: #a4abb5; text-align: right; padding-right: 10px;
+                    user-select: none; }
+  #src .l.err { background: #fdecea; }
+  #src .l.err::before { color: var(--bad); font-weight: 700; }
+  #src .l.hit { background: #fff3cd; }
+  #src .l.pick { background: #ffe8b0; box-shadow: inset 3px 0 0 var(--pick); }
+  #src .t { color: #1f4e9c; } #src .a { color: #8a3ffc; } #src .v { color: #1b6e4f; }
+  #src .c { color: #8a8f98; font-style: italic; } #src .pi { color: #b0006b; }
+
+  /* page image */
+  #pagebar { position: sticky; top: 0; display: flex; gap: 8px; align-items: center; padding: 6px 8px;
+             background: #fafbfc; border-bottom: 1px solid var(--line); }
+  #pagebar .grow { flex: 1; color: var(--muted); }
+  #pageimg { display: block; max-width: 100%; margin: 8px auto; box-shadow: 0 1px 4px #0002; }
+  .empty { color: var(--muted); padding: 24px; text-align: center; }
+
+  /* checks */
+  #checks { padding: 10px 14px 30px; }
+  #checks h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted);
+               margin: 18px 0 6px; }
+  #checks h3:first-child { margin-top: 4px; }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px; }
+  .kv dt { color: var(--muted); } .kv dd { margin: 0; }
+  .item { padding: 5px 8px; border-left: 3px solid var(--line); margin: 4px 0; background: #fafbfc;
+          cursor: default; }
+  .item.bad { border-left-color: var(--bad); } .item.warn { border-left-color: var(--warn); }
+  .item.okk { border-left-color: var(--ok); }
+  .item[data-line], .item[data-find] { cursor: pointer; }
+  .item[data-line]:hover, .item[data-find]:hover { background: #eef3fb; }
+  .item b { font-family: var(--mono); font-weight: 600; }
+  .stats { display: flex; flex-wrap: wrap; gap: 6px; }
+  .stat { background: #f1f3f6; border-radius: 4px; padding: 2px 7px; }
+  .stat b { font-weight: 600; }
+
+  /* status bar */
+  footer { display: flex; gap: 14px; padding: 4px 12px; background: var(--panel);
+           border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; min-height: 26px;
+           align-items: center; }
+  #path { font-family: var(--mono); color: var(--ink); overflow: hidden; text-overflow: ellipsis;
+          white-space: nowrap; flex: 1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>pdf2xml <span>preview</span></h1>
+  <label class="field">Document <select id="doc"></select></label>
+  <label class="field">File <select id="file"></select></label>
+  <label class="field">Stylesheet <select id="sheet"></select></label>
+  <div class="toggles">
+    <label class="toggle" title="Outline elements and show their XML names"><input type="checkbox" id="tTags"> Tags</label>
+    <label class="toggle" title="Colour the granular parts of each reference"><input type="checkbox" id="tCite"> Citation parts</label>
+    <label class="toggle" title="Show the XML / PDF page / checks panel"><input type="checkbox" id="tSide" checked> XML panel</label>
+  </div>
+  <div class="spacer"></div>
+  <button class="chip" id="valid" title="Schema validation — click for details">…</button>
+  <label class="live toggle" title="Reload when the XML, the XSLT or its CSS changes on disk">
+    <input type="checkbox" id="tLive" checked><span class="dot" id="dot"></span> Live
+  </label>
+  <button class="btn" id="reload" title="Reload now (R)">Reload</button>
+</header>
+
+<main id="main">
+  <aside id="side">
+    <nav class="tabs">
+      <button data-tab="source">XML</button>
+      <button data-tab="page">PDF page</button>
+      <button data-tab="checks">Checks<span class="count" id="errcount" hidden></span></button>
+    </nav>
+    <section class="pane" id="p-source">
+      <div id="srcbar">
+        <input id="find" placeholder="Find in XML (Enter = next)" spellcheck="false">
+        <button id="nexterr" title="Next validation error">Next error</button>
+      </div>
+      <div id="src"></div>
+    </section>
+    <section class="pane" id="p-page">
+      <div id="pagebar">
+        <button class="btn" id="pprev">◀</button>
+        <span class="grow" id="pinfo">—</span>
+        <label class="toggle"><input type="checkbox" id="tFollow" checked> Follow preview</label>
+        <button class="btn" id="pnext">▶</button>
+      </div>
+      <div id="pagebox"></div>
+    </section>
+    <section class="pane" id="p-checks"><div id="checks"></div></section>
+  </aside>
+  <div id="drag" title="Drag to resize"></div>
+  <div id="view"><iframe id="frame" title="Preview"></iframe><div id="busy">rendering…</div></div>
+</main>
+
+<footer><span id="path">Click a line of XML to see it in the preview, or click the preview to find its XML.</span><span id="stamp"></span></footer>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+// a link can preset the view: #doc=…&file=…&sheet=…&tab=page&tags=1&cite=1
+const HASH = new URLSearchParams(location.hash.slice(1));
+const FROM_HASH = { doc: "doc", file: "file", sheet: "sheet", tab: "tab", tags: "tags", cite: "cite" };
+const store = {
+  get(k, d) {
+    const h = Object.keys(FROM_HASH).find((x) => FROM_HASH[x] === k);
+    if (h && HASH.has(h)) { const v = HASH.get(h); return v === "1" ? true : v === "0" ? false : v; }
+    try { const v = localStorage.getItem("pv." + k); return v === null ? d : JSON.parse(v); } catch { return d; }
+  },
+  set(k, v) { try { localStorage.setItem("pv." + k, JSON.stringify(v)); } catch {} },
+};
+const S = { docs: [], sheets: [], stamp: null, sourceFor: null, lines: [], errors: [], pages: null,
+            page: 1, errIdx: -1, findIdx: -1, sheetPicked: store.get("sheetPicked", false) };
+
+async function api(name, params) {
+  const r = await fetch(`/api/${name}?` + new URLSearchParams(params));
+  if (!r.ok) throw new Error(await r.text());
+  return name === "source" ? r.text() : r.json();
+}
+const cur = () => ({ doc: $("doc").value, file: $("file").value, sheet: $("sheet").value });
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+/* ---------------------------------------------------------------- setup */
+async function init() {
+  const data = await api("docs", {});
+  S.docs = data.docs; S.sheets = data.sheets;
+  if (!S.docs.length) {
+    $("frame").srcdoc = `<p style="font:14px system-ui;padding:2rem">No conversion folders with XML files in <code>${esc(data.root)}</code>. Run <code>pdf2xml convert</code> first.</p>`;
+    return;
+  }
+  $("doc").innerHTML = S.docs.map((d) => `<option>${esc(d.name)}</option>`).join("");
+  $("sheet").innerHTML = S.sheets.map((s) => `<option value="${s.id}" title="${esc(s.path)}">${esc(s.name)}</option>`).join("");
+  const d = store.get("doc", null);
+  if (d && S.docs.some((x) => x.name === d)) $("doc").value = d;
+  const sh = store.get("sheet", null);
+  if (sh && S.sheets.some((x) => x.id === sh)) $("sheet").value = sh;
+  $("tTags").checked = store.get("tags", false);
+  $("tCite").checked = store.get("cite", false);
+  $("tSide").checked = store.get("side", true);
+  $("tLive").checked = store.get("live", true);
+  document.documentElement.style.setProperty("--side", store.get("width", "44%"));
+  fillFiles(store.get("file", null));
+  showSide(); tab(store.get("tab", "source"));
+  await loadAll();
+  setInterval(poll, 1200);
+}
+
+function fillFiles(want) {
+  const d = S.docs.find((x) => x.name === $("doc").value);
+  $("file").innerHTML = d.files.map((f) => `<option>${esc(f)}</option>`).join("");
+  if (want && d.files.includes(want)) $("file").value = want;
+  autoSheet();
+}
+
+function autoSheet() {
+  // the canonical XML needs the EPUB sheet, publishing XML the proof sheet, unless the user chose
+  if (HASH.has("sheet")) return;
+  const canonical = $("file").value.includes("canonical");
+  const chosen = S.sheets.find((s) => s.id === $("sheet").value);
+  if (!S.sheetPicked || (chosen && chosen.builtin)) $("sheet").value = canonical ? "canonical" : "proof";
+}
+
+/* ---------------------------------------------------------------- preview */
+function viewUrl() {
+  const c = cur();
+  return `/view/${encodeURIComponent(c.sheet)}/${encodeURIComponent(c.doc)}/${encodeURIComponent(c.file)}`;
+}
+
+function render(keepScroll) {
+  const f = $("frame");
+  let y = 0;
+  try { if (keepScroll) y = f.contentWindow.scrollY; } catch {}
+  $("busy").style.display = "block";
+  f.onload = () => {
+    $("busy").style.display = "none";
+    const w = f.contentWindow, doc = f.contentDocument;
+    if (!doc || !doc.body) return;
+    applyModes();
+    if (y) w.scrollTo(0, y);
+    doc.addEventListener("click", onPreviewClick);
+    w.addEventListener("scroll", followPage, { passive: true });
+    runDomChecks();
+    followPage();
+  };
+  f.src = viewUrl() + "?t=" + Date.now();
+}
+
+function applyModes() {
+  const b = $("frame").contentDocument && $("frame").contentDocument.body;
+  if (!b) return;
+  b.classList.toggle("pv-show-tags", $("tTags").checked);
+  b.classList.toggle("pv-show-cite", $("tCite").checked);
+}
+
+function onPreviewClick(e) {
+  const doc = $("frame").contentDocument;
+  const page = e.target.closest(".pv-page");
+  if (page) { gotoFolio(page.dataset.page); tab("page"); return; }
+  const el = e.target.closest("[data-line]") || e.target.closest("[data-tag]");
+  if (!el) return;
+  if (!e.target.closest("a[href^='http']")) e.preventDefault();
+  doc.querySelectorAll(".pv-picked").forEach((x) => x.classList.remove("pv-picked"));
+  el.classList.add("pv-picked");
+  const chain = [];
+  for (let n = el; n && n.dataset; n = n.parentElement) if (n.dataset.tag) chain.unshift(n.dataset.tag);
+  $("path").textContent = chain.join(" › ") + (el.dataset.line ? `   (line ${el.dataset.line})` : "");
+  if (el.dataset.line) { tab("source"); gotoLine(+el.dataset.line, "pick"); }
+  // an internal link still jumps inside the preview
+  const a = e.target.closest("a[href^='#']");
+  if (a) { const t = doc.getElementById(a.getAttribute("href").slice(1)); if (t) t.scrollIntoView({ block: "center" }); }
+}
+
+/* ---------------------------------------------------------------- source */
+async function loadSource(force) {
+  const c = cur(), key = c.doc + "/" + c.file;
+  if (!force && S.sourceFor === key) return;
+  const text = await api("source", c);
+  S.sourceFor = key;
+  S.lines = text.split(/\r?\n/);
+  const errs = new Set(S.errors.map((e) => e.line));
+  $("src").innerHTML = S.lines.map((l, i) =>
+    `<div class="l${errs.has(i + 1) ? " err" : ""}" data-n="${i + 1}"><code>${hl(l) || " "}</code></div>`).join("");
+}
+
+function hl(line) {
+  return esc(line)
+    .replace(/(&lt;!--.*?--&gt;)/g, '<span class="c">$1</span>')
+    .replace(/(&lt;\?.*?\?&gt;)/g, '<span class="pi">$1</span>')
+    .replace(/(&lt;\/?)([\w:.-]+)/g, '$1<span class="t">$2</span>')
+    .replace(/ ([\w:.-]+)=(&quot;.*?&quot;)/g, ' <span class="a">$1</span>=<span class="v">$2</span>');
+}
+
+function gotoLine(n, cls) {
+  const row = $("src").children[n - 1];
+  if (!row) return;
+  $("src").querySelectorAll("." + cls).forEach((x) => x.classList.remove(cls));
+  row.classList.add(cls);
+  row.scrollIntoView({ block: "center" });
+}
+
+// XML → preview: a click on a source line shows the element that starts on (or before) it
+$("src").addEventListener("click", (e) => {
+  const row = e.target.closest(".l");
+  if (!row || window.getSelection().toString()) return;      // let text selection work
+  const n = +row.dataset.n;
+  $("src").querySelectorAll(".pick").forEach((x) => x.classList.remove("pick"));
+  row.classList.add("pick");
+  const d = $("frame").contentDocument;
+  if (!d) return;
+  let best = null, bestLine = -1;
+  for (const el of d.querySelectorAll("[data-line]")) {
+    const l = +el.dataset.line;
+    if (l <= n && l > bestLine) { best = el; bestLine = l; }   // first (outermost) on that line
+  }
+  if (!best) return;
+  d.querySelectorAll(".pv-picked").forEach((x) => x.classList.remove("pv-picked"));
+  best.classList.add("pv-picked");
+  best.scrollIntoView({ block: "center" });
+  const chain = [];
+  for (let el = best; el && el.dataset; el = el.parentElement) if (el.dataset.tag) chain.unshift(el.dataset.tag);
+  $("path").textContent = chain.join(" › ") + `   (line ${bestLine})`;
+});
+
+function find(next) {
+  const q = $("find").value.toLowerCase();
+  if (!q) return;
+  const start = next ? S.findIdx + 1 : 0;
+  for (let k = 0; k < S.lines.length; k++) {
+    const i = (start + k) % S.lines.length;
+    if (S.lines[i].toLowerCase().includes(q)) { S.findIdx = i; gotoLine(i + 1, "hit"); return; }
+  }
+}
+
+/* ---------------------------------------------------------------- validation + checks */
+async function loadValidation() {
+  const c = cur();
+  const chip = $("valid");
+  try {
+    const v = await api("validate", c);
+    S.errors = v.errors;
+    chip.className = "chip " + (v.errors.length ? "bad" : "ok");
+    chip.textContent = v.errors.length ? `✗ ${v.errors.length} error${v.errors.length > 1 ? "s" : ""} · ${v.schema}`
+                                       : `✓ valid · ${v.schema}`;
+    $("errcount").hidden = !v.errors.length;
+    $("errcount").textContent = v.errors.length;
+    S.validation = v;
+  } catch (e) {
+    chip.className = "chip bad"; chip.textContent = "validation failed"; S.errors = [];
+    S.validation = { schema: "?", errors: [{ line: null, message: String(e) }] };
+  }
+}
+
+async function loadChecks() {
+  const c = cur();
+  const rep = await api("report", { doc: c.doc }).catch(() => ({}));
+  S.report = rep;
+  drawChecks();
+}
+
+function drawChecks() {
+  const v = S.validation || { errors: [] }, rep = S.report || {}, dom = S.dom || {};
+  const key = $("file").value.startsWith("40_") ? "bits" : $("file").value.startsWith("41_") ? "jats" : null;
+  const exp = key && rep.exports ? rep.exports[key] : null;
+  let h = `<h3>Schema — ${esc(v.schema || "")}</h3>`;
+  h += v.errors.length ? v.errors.slice(0, 300).map((e) =>
+      `<div class="item bad" ${e.line ? `data-line="${e.line}"` : ""}>${e.line ? `<b>line ${e.line}</b> ` : ""}${esc(e.message)}</div>`).join("")
+    : `<div class="item okk">No errors.</div>`;
+  h += `<h3>In this preview</h3><div class="stats">`;
+  for (const [k, label, sel] of [["unknown", "unhandled elements", ".pv-unknown"], ["broken", "broken xrefs", ".pv-broken"],
+      ["uncited", "uncited references", ".pv-uncited"], ["boxes", "boxes", ".pv-box"], ["pages", "page markers", ".pv-page"],
+      ["queries", "queries", ".pv-query"], ["xrefs", "xrefs", ".pv-xref"]]) {
+    const n = dom[k] || 0;
+    const bad = ["unknown", "broken", "uncited"].includes(k) && n;
+    h += `<span class="stat item ${bad ? "bad" : ""}" ${n ? `data-find="${sel}"` : ""} title="${n ? "click: next one" : ""}"><b>${n}</b> ${label}</span>`;
+  }
+  h += `</div>`;
+  if (exp) {
+    h += `<h3>Export report (${key})</h3><div class="stats">` +
+      Object.entries(exp.stats || {}).map(([k, n]) => `<span class="stat"><b>${n}</b> ${esc(k.replace(/_/g, " "))}</span>`).join("") + `</div>`;
+    h += (exp.warnings || []).map((w) => `<div class="item warn">${esc(w)}</div>`).join("");
+  }
+  if (rep.coverage) {
+    h += `<h3>Conversion</h3><dl class="kv"><dt>source</dt><dd>${esc(rep.source)}</dd><dt>engine</dt><dd>${esc(rep.engine)}</dd>` +
+      `<dt>text coverage</dt><dd>${coverage(rep.coverage)}</dd>` +
+      `<dt>canonical XML</dt><dd>${rep.xml_valid ? "valid" : "invalid"}</dd></dl>` +
+      (rep.warnings || []).map((w) => `<div class="item warn">${esc(w)}</div>`).join("");
+  }
+  $("checks").innerHTML = h;
+}
+
+function coverage(c) {
+  if (c.ok) return "complete";
+  const fmt = (m) => Object.entries(m || {}).map(([ch, n]) => `“${esc(ch)}”×${n}`).join(" ");
+  const miss = Object.keys(c.missing || {}).length, extra = Object.keys(c.extra || {}).length;
+  return `ratio ${c.ratio}` + (miss ? ` · missing ${fmt(c.missing)}` : "") + (extra ? ` · extra ${fmt(c.extra)}` : "");
+}
+
+function runDomChecks() {
+  const d = $("frame").contentDocument;
+  if (!d) return;
+  const n = (s) => d.querySelectorAll(s).length;
+  S.dom = { unknown: n(".pv-unknown"), broken: n(".pv-broken"), uncited: n(".pv-uncited"), boxes: n(".pv-box"),
+            pages: n(".pv-page"), queries: n(".pv-query"), xrefs: n(".pv-xref") };
+  S.findPos = {};
+  drawChecks();
+}
+
+$("checks").addEventListener("click", (e) => {
+  const it = e.target.closest(".item");
+  if (!it) return;
+  if (it.dataset.line) { tab("source"); gotoLine(+it.dataset.line, "pick"); }
+  if (it.dataset.find) {
+    const d = $("frame").contentDocument, all = d.querySelectorAll(it.dataset.find);
+    const i = ((S.findPos[it.dataset.find] ?? -1) + 1) % all.length;
+    S.findPos[it.dataset.find] = i;
+    d.querySelectorAll(".pv-picked").forEach((x) => x.classList.remove("pv-picked"));
+    all[i].classList.add("pv-picked");
+    all[i].scrollIntoView({ block: "center" });
+  }
+});
+
+/* ---------------------------------------------------------------- PDF page */
+async function loadPages() {
+  S.pages = await api("pages", { doc: cur().doc }).catch(() => ({ pages: [], folios: {} }));
+  showPage(S.pages.pages[0] || 1);
+}
+
+function showPage(n) {
+  if (!S.pages || !S.pages.pages.length) {
+    $("pagebox").innerHTML = `<div class="empty">No page images. Convert with QA overlays on (the default) to see the PDF pages here.</div>`;
+    $("pinfo").textContent = "—";
+    return;
+  }
+  const list = S.pages.pages;
+  n = Math.max(list[0], Math.min(list[list.length - 1], n));
+  if (S.page === n && $("pageimg")) return;
+  S.page = n;
+  const folio = Object.keys(S.pages.folios).find((k) => S.pages.folios[k] === n);
+  $("pinfo").textContent = `PDF page ${n} of ${list.length}` + (folio ? ` · printed ${folio}` : "");
+  const img = `/files/${encodeURIComponent(cur().doc)}/qa/page-${String(n).padStart(3, "0")}.png`;
+  $("pagebox").innerHTML = `<img id="pageimg" alt="PDF page ${n} with detected blocks" src="${img}">`;
+}
+
+function gotoFolio(folio) {
+  if (!S.pages) return;
+  const n = S.pages.folios[folio] ?? parseInt(folio, 10);
+  if (!Number.isNaN(n)) showPage(n);
+}
+
+function followPage() {
+  if (!$("tFollow").checked || !S.pages) return;
+  const d = $("frame").contentDocument;
+  if (!d) return;
+  let last = null;
+  for (const p of d.querySelectorAll(".pv-page")) {
+    if (p.getBoundingClientRect().top < 120) last = p; else break;
+  }
+  if (last) gotoFolio(last.dataset.page); else if (S.pages.pages.length) showPage(S.pages.pages[0]);
+}
+
+/* ---------------------------------------------------------------- live reload */
+async function poll() {
+  if (!$("tLive").checked || document.hidden) return;
+  try {
+    const { stamp } = await api("stamp", cur());
+    if (S.stamp && stamp !== S.stamp) {
+      $("dot").classList.add("flash");
+      setTimeout(() => $("dot").classList.remove("flash"), 600);
+      S.stamp = stamp;
+      await refresh(true);
+    }
+    S.stamp = stamp;
+  } catch {}
+}
+
+async function refresh(keepScroll) {
+  await loadValidation();
+  render(keepScroll);
+  if (S.sourceFor !== null || $("p-source").classList.contains("active")) await loadSource(true);
+  loadChecks();
+  $("stamp").textContent = "updated " + new Date().toLocaleTimeString();
+}
+
+async function loadAll() {
+  const c = cur();
+  store.set("doc", c.doc); store.set("file", c.file); store.set("sheet", c.sheet);
+  S.stamp = null; S.sourceFor = null; S.page = 0;
+  api("stamp", c).then((r) => { S.stamp = r.stamp; }).catch(() => {});
+  await loadValidation();
+  render(false);
+  if ($("p-source").classList.contains("active")) await loadSource(true);
+  loadChecks();
+  loadPages();
+  $("stamp").textContent = "loaded " + new Date().toLocaleTimeString();
+}
+
+/* ---------------------------------------------------------------- side panel */
+function tab(name) {
+  document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+  document.querySelectorAll(".pane").forEach((p) => p.classList.toggle("active", p.id === "p-" + name));
+  store.set("tab", name);
+  if (name === "source") loadSource(false);
+}
+function showSide() { $("main").classList.toggle("noside", !$("tSide").checked); }
+
+document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("click", () => tab(b.dataset.tab)));
+$("doc").addEventListener("change", () => { fillFiles($("file").value); loadAll(); });
+$("file").addEventListener("change", () => { autoSheet(); loadAll(); });
+$("sheet").addEventListener("change", () => {
+  S.sheetPicked = !S.sheets.find((s) => s.id === $("sheet").value).builtin;
+  store.set("sheetPicked", S.sheetPicked); loadAll();
+});
+$("tTags").addEventListener("change", () => { store.set("tags", $("tTags").checked); applyModes(); });
+$("tCite").addEventListener("change", () => { store.set("cite", $("tCite").checked); applyModes(); });
+$("tSide").addEventListener("change", () => { store.set("side", $("tSide").checked); showSide(); });
+$("tLive").addEventListener("change", () => { store.set("live", $("tLive").checked); $("dot").classList.toggle("on", $("tLive").checked); });
+$("dot").classList.toggle("on", store.get("live", true));
+$("reload").addEventListener("click", () => refresh(true));
+$("valid").addEventListener("click", () => { $("tSide").checked = true; showSide(); tab("checks"); });
+$("find").addEventListener("keydown", (e) => { if (e.key === "Enter") find(true); });
+$("nexterr").addEventListener("click", () => {
+  const lines = S.errors.filter((e) => e.line).map((e) => e.line);
+  if (!lines.length) return;
+  S.errIdx = (S.errIdx + 1) % lines.length;
+  gotoLine(lines[S.errIdx], "pick");
+});
+$("pprev").addEventListener("click", () => { $("tFollow").checked = false; showPage(S.page - 1); });
+$("pnext").addEventListener("click", () => { $("tFollow").checked = false; showPage(S.page + 1); });
+document.addEventListener("keydown", (e) => {
+  if (e.key === "r" && !e.ctrlKey && !e.metaKey && e.target.tagName !== "INPUT") refresh(true);
+});
+
+// drag to resize the side panel
+$("drag").addEventListener("pointerdown", (e) => {
+  const main = $("main"), frame = $("frame");
+  frame.style.pointerEvents = "none";
+  const move = (ev) => {
+    const r = main.getBoundingClientRect();
+    const w = Math.max(240, Math.min(r.width - 300, ev.clientX - r.left));
+    document.documentElement.style.setProperty("--side", w + "px");
+  };
+  const up = () => {
+    frame.style.pointerEvents = "";
+    store.set("width", getComputedStyle(document.documentElement).getPropertyValue("--side"));
+    removeEventListener("pointermove", move); removeEventListener("pointerup", up);
+  };
+  addEventListener("pointermove", move); addEventListener("pointerup", up);
+  e.preventDefault();
+});
+
+init().catch((e) => { $("frame").srcdoc = `<pre style="padding:2rem;color:#b3261e">${esc(e)}</pre>`; });
+</script>
+</body>
+</html>

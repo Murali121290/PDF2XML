@@ -1,0 +1,21 @@
+# BITS 2.2, a whole book in one file: <book> with front-matter (title and copyright pages,
+# dedication, the printed contents as <toc>, preface …), book-body (a book-part per chapter, or
+# per part holding its chapters) and book-back (appendices, glossary, index, endnotes …).
+# Book metadata (ISBNs, publisher, year, copyright) is read from the copyright page; a
+# metadata file (--meta) overrides it.
+name: bits-book
+
+bits:
+  root: book                    # "auto" (the default) also picks <book> for a whole book
+  book_part_type: chapter
+
+matter: true                    # front and back matter, printed contents, index, endnotes
+
+ids:
+  chapter: "ch{n}"              # chapters of the book
+  book_part: "part{n}"          # parts that hold chapters ("Part 2 …")
+  matter: "{kind}{n}"           # toc1, pref1, ack1, gloss1, idx1, app1, notes1, bio1, fm1 …
+  sec: "sec{n}"
+  page: "page_{folio}"          # printed page number: page_vii, page_12
+
+page_markers: target            # the index and the contents link to these page targets

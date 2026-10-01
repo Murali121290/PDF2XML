@@ -1,0 +1,25 @@
+# Metadata for one book chapter. Everything is optional; what is given here overrides what is
+# detected in the PDF.
+lang: en
+
+book:
+  title: "Evaluation of Quality in Health Care for DNPs"
+  publisher: "Springer Publishing"
+  publisher_loc: "New York, NY"
+  isbn: ""                      # print ISBN
+  eisbn: ""                     # electronic ISBN
+  doi: ""
+  edition: ""
+  pub_date: {year: 2026}
+  contributors: []              # editors: [{surname: …, given: …, role: editor}]
+
+chapter:
+  number: "11"                  # used in ID patterns as {chapter}
+  label: "11"
+  title: "Evaluation of Population Health Outcomes"
+  doi: ""
+  contributors:
+    - {surname: Bejster, given: Mallory, role: author}
+    - {surname: Cygan, given: Heide, role: author}
+  fpage: "135"
+  lpage: "148"

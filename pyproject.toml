@@ -1,0 +1,65 @@
+[project]
+name = "pdf2xml"
+version = "0.3.1"
+description = "Convert born-digital PDFs to canonical JSON/XML, EPUB 3 and DOCX, keeping structure and styles."
+requires-python = ">=3.11,<3.14"
+license = { text = "Proprietary" }
+dependencies = [
+    "pydantic>=2.7",          # MIT
+    "pdfplumber>=0.11",       # MIT
+    "pypdfium2>=4.30",        # Apache-2.0 / BSD-3
+    "pikepdf>=9.0",           # MPL-2.0
+    "lxml>=5.2",              # BSD
+    "saxonche>=12.5",         # MPL-2.0
+    "python-docx>=1.1",       # MIT
+    "typer>=0.12",            # MIT
+    "pillow>=10.0",           # MIT-CMU
+    "pyyaml>=6.0",            # MIT — export profiles and metadata files
+]
+
+[project.optional-dependencies]
+ml = ["docling>=2.0"]         # MIT (pulls torch)
+
+[project.scripts]
+pdf2xml = "pdf2xml.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "reportlab>=4.0",         # BSD — only used to generate test fixture PDFs
+    "epubcheck>=5.1",         # bundles W3C EPUBCheck (needs Java)
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pdf2xml"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+module = ["pdf2xml.merge.*", "pdf2xml.styles.*", "pdf2xml.xml.*", "pdf2xml.model.*"]
+strict = true
+
+[[tool.mypy.overrides]]
+module = ["docling_core.*"]
+implicit_reexport = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = ["slow: runs ML models (Docling); deselect with -m 'not slow'"]

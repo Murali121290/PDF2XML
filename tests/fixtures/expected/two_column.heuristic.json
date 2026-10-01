@@ -1,0 +1,539 @@
+{
+  "artifacts": [
+    {
+      "bbox": [
+        56.69,
+        27.67,
+        182.95,
+        35.67
+      ],
+      "kind": "header",
+      "page": 1,
+      "text": "Sample Report - Converter Fixtures"
+    },
+    {
+      "bbox": [
+        295.41,
+        807.2,
+        299.86,
+        815.2
+      ],
+      "kind": "page_number",
+      "page": 1,
+      "text": "1"
+    },
+    {
+      "bbox": [
+        56.69,
+        27.67,
+        182.95,
+        35.67
+      ],
+      "kind": "header",
+      "page": 2,
+      "text": "Sample Report - Converter Fixtures"
+    },
+    {
+      "bbox": [
+        295.41,
+        807.2,
+        299.86,
+        815.2
+      ],
+      "kind": "page_number",
+      "page": 2,
+      "text": "2"
+    }
+  ],
+  "body": [
+    {
+      "bbox": [
+        112.07,
+        66.83,
+        483.21,
+        86.83
+      ],
+      "id": "b1",
+      "level": 1,
+      "page": 1,
+      "para": {
+        "align": "center"
+      },
+      "runs": [
+        {
+          "text": "A Two-Column Study of Reading Order"
+        }
+      ],
+      "style": "h1",
+      "type": "heading"
+    },
+    {
+      "bbox": [
+        57.02,
+        98.75,
+        538.25,
+        132.25
+      ],
+      "id": "b2",
+      "page": 1,
+      "para": {
+        "align": "center",
+        "line_height": 1.26,
+        "space_before": 11.9
+      },
+      "runs": [
+        {
+          "italic": true,
+          "text": "Abstract "
+        },
+        {
+          "text": "- Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read."
+        }
+      ],
+      "style": "body",
+      "type": "paragraph"
+    },
+    {
+      "bbox": [
+        57.02,
+        150.63,
+        134.84,
+        164.63
+      ],
+      "id": "b3",
+      "level": 2,
+      "page": 1,
+      "para": {
+        "align": "left",
+        "space_before": 18.4
+      },
+      "runs": [
+        {
+          "text": "1. Section 1"
+        }
+      ],
+      "style": "h2",
+      "type": "heading"
+    },
+    {
+      "bbox": [
+        57.02,
+        172.79,
+        280.3,
+        290.29
+      ],
+      "id": "b4",
+      "page": 1,
+      "para": {
+        "align": "justify",
+        "line_height": 1.26,
+        "space_before": 8.2
+      },
+      "runs": [
+        {
+          "text": "[1.1] Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read. Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read."
+        }
+      ],
+      "style": "body",
+      "type": "paragraph"
+    },
+    {
+      "bbox": [
+        57.02,
+        298.79,
+        280.3,
+        416.29
+      ],
+      "id": "b5",
+      "page": 1,
+      "para": {
+        "align": "justify",
+        "line_height": 1.26,
+        "space_before": 8.5
+      },
+      "runs": [
+        {
+          "text": "[1.2] Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read. Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read."
+        }
+      ],
+      "style": "body",
+      "type": "paragraph"
+    },
+    {
+      "bbox": [
+        57.02,
+        424.79,
+        280.3,
+        542.29
+      ],
+      "id": "b6",
+      "page": 1,
+      "para": {
+        "align": "justify",
+        "line_height": 1.26,
+        "space_before": 8.5
+      },
+      "runs": [
+        {
+          "text": "[1.3] Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read. Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read."
+        }
+      ],
+      "style": "body",
+      "type": "paragraph"
+    },
+    {
+      "bbox": [
+        57.02,
+        555.63,
+        134.84,
+        569.63
+      ],
+      "id": "b7",
+      "level": 2,
+      "page": 1,
+      "para": {
+        "align": "left",
+        "space_before": 13.3
+      },
+      "runs": [
+        {
+          "text": "2. Section 2"
+        }
+      ],
+      "style": "h2",
+      "type": "heading"
+    },
+    {
+      "bbox": [
+        57.02,
+        577.79,
+        280.3,
+        695.29
+      ],
+      "id": "b8",
+      "page": 1,
+      "para": {
+        "align": "justify",
+        "line_height": 1.26,
+        "space_before": 8.2
+      },
+      "runs": [
+        {
+          "text": "[2.1] Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read. Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read."
+        }
+      ],
+      "style": "body",
+      "type": "paragraph"
+    },
+    {
+      "bbox": [
+        57.02,
+        703.79,
+        280.3,
+        773.29
+      ],
+      "id": "b9",
+      "page": 1,
+      "para": {
+        "align": "justify",
+        "line_height": 1.26,
+        "space_before": 8.5
+      },
+      "runs": [
+        {
+          "text": "[2.2] Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read. Born-digital documents keep their text as real characters,"
+        }
+      ],
+      "style": "body",
+      "type": "paragraph"
+    },
+    {
+      "bbox": [
+        314.98,
+        149.79,
+        538.25,
+        195.29
+      ],
+      "id": "b10",
+      "page": 1,
+      "para": {
+        "align": "justify",
+        "line_height": 1.26
+      },
+      "runs": [
+        {
+          "text": "so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read."
+        }
+      ],
+      "style": "body",
+      "type": "paragraph"
+    },
+    {
+      "bbox": [
+        314.98,
+        203.79,
+        538.25,
+        321.29
+      ],
+      "id": "b11",
+      "page": 1,
+      "para": {
+        "align": "justify",
+        "line_height": 1.26,
+        "space_before": 8.5
+      },
+      "runs": [
+        {
+          "text": "[2.3] Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read. Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read."
+        }
+      ],
+      "style": "body",
+      "type": "paragraph"
+    },
+    {
+      "bbox": [
+        314.98,
+        334.63,
+        392.79,
+        348.63
+      ],
+      "id": "b12",
+      "level": 2,
+      "page": 1,
+      "para": {
+        "align": "left",
+        "space_before": 13.3
+      },
+      "runs": [
+        {
+          "text": "3. Section 3"
+        }
+      ],
+      "style": "h2",
+      "type": "heading"
+    },
+    {
+      "bbox": [
+        314.98,
+        356.79,
+        538.25,
+        474.29
+      ],
+      "id": "b13",
+      "page": 1,
+      "para": {
+        "align": "justify",
+        "line_height": 1.26,
+        "space_before": 8.2
+      },
+      "runs": [
+        {
+          "text": "[3.1] Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read. Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read."
+        }
+      ],
+      "style": "body",
+      "type": "paragraph"
+    },
+    {
+      "bbox": [
+        314.98,
+        482.79,
+        538.25,
+        600.29
+      ],
+      "id": "b14",
+      "page": 1,
+      "para": {
+        "align": "justify",
+        "line_height": 1.26,
+        "space_before": 8.5
+      },
+      "runs": [
+        {
+          "text": "[3.2] Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read. Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read."
+        }
+      ],
+      "style": "body",
+      "type": "paragraph"
+    },
+    {
+      "bbox": [
+        314.98,
+        608.79,
+        538.25,
+        726.29
+      ],
+      "id": "b15",
+      "page": 1,
+      "para": {
+        "align": "justify",
+        "line_height": 1.26,
+        "space_before": 8.5
+      },
+      "runs": [
+        {
+          "text": "[3.3] Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read. Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read."
+        }
+      ],
+      "style": "body",
+      "type": "paragraph"
+    },
+    {
+      "bbox": [
+        314.98,
+        739.63,
+        392.79,
+        753.63
+      ],
+      "id": "b16",
+      "level": 2,
+      "page": 1,
+      "para": {
+        "align": "left",
+        "space_before": 13.3
+      },
+      "runs": [
+        {
+          "text": "4. Section 4"
+        }
+      ],
+      "style": "h2",
+      "type": "heading"
+    },
+    {
+      "bbox": [
+        57.02,
+        64.75,
+        280.3,
+        182.25
+      ],
+      "id": "b17",
+      "page": 2,
+      "para": {
+        "align": "justify",
+        "line_height": 1.26
+      },
+      "runs": [
+        {
+          "text": "[4.1] Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read. Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read."
+        }
+      ],
+      "style": "body",
+      "type": "paragraph"
+    },
+    {
+      "bbox": [
+        57.02,
+        190.75,
+        280.3,
+        308.25
+      ],
+      "id": "b18",
+      "page": 2,
+      "para": {
+        "align": "justify",
+        "line_height": 1.26,
+        "space_before": 8.5
+      },
+      "runs": [
+        {
+          "text": "[4.2] Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read. Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read."
+        }
+      ],
+      "style": "body",
+      "type": "paragraph"
+    },
+    {
+      "bbox": [
+        57.02,
+        316.75,
+        280.3,
+        434.25
+      ],
+      "id": "b19",
+      "page": 2,
+      "para": {
+        "align": "justify",
+        "line_height": 1.26,
+        "space_before": 8.5
+      },
+      "runs": [
+        {
+          "text": "[4.3] Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read. Born-digital documents keep their text as real characters, so a converter can read the exact font, size and colour of every word. The hard part is recovering structure: which lines form a paragraph, where a heading starts, and in which order the columns are read."
+        }
+      ],
+      "style": "body",
+      "type": "paragraph"
+    }
+  ],
+  "footnotes": [],
+  "meta": {
+    "doc_type": "generic",
+    "engine": "heuristic",
+    "lang": "en",
+    "pages": 2,
+    "schema_version": "1",
+    "sha256": "747036f8dd223fec4583076651e47793135b0d3fc1cf52950f13b24731686c4c",
+    "source": "two_column.pdf",
+    "stats": {
+      "artifacts": 4,
+      "dehyphenated": 0,
+      "orphan_words": 0,
+      "promoted_headings": 0
+    },
+    "style_backend": "pdfplumber",
+    "tagged": false,
+    "title": "A Two-Column Study of Reading Order",
+    "warnings": []
+  },
+  "pages": [
+    {
+      "height": 841.89,
+      "n": 1,
+      "width": 595.28
+    },
+    {
+      "height": 841.89,
+      "n": 2,
+      "width": 595.28
+    }
+  ],
+  "references": [],
+  "styles": {
+    "body": {
+      "bold": false,
+      "char_count": 5536,
+      "color": "#000000",
+      "font": "Times New Roman",
+      "generic": "serif",
+      "italic": false,
+      "role": "body",
+      "size": 9.5,
+      "small_caps": false
+    },
+    "h1": {
+      "bold": true,
+      "char_count": 30,
+      "color": "#1a3c6e",
+      "font": "Arial",
+      "generic": "sans-serif",
+      "italic": false,
+      "level": 1,
+      "role": "heading",
+      "size": 20.0,
+      "small_caps": false
+    },
+    "h2": {
+      "bold": true,
+      "char_count": 40,
+      "color": "#1a3c6e",
+      "font": "Arial",
+      "generic": "sans-serif",
+      "italic": false,
+      "level": 2,
+      "role": "heading",
+      "size": 14.0,
+      "small_caps": false
+    }
+  }
+}

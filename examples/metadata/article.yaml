@@ -1,0 +1,25 @@
+# Metadata for one journal article (JATS). Publishing tag set needs journal.id and an ISSN;
+# Authoring needs contributors and an abstract (detected from the PDF or given here).
+lang: en
+
+journal:
+  id: "jexample"
+  nlm_ta: "J Example"
+  title: "Journal of Examples"
+  issn: "1234-5678"
+  eissn: "8765-4321"
+  publisher: "Example Press"
+
+article:
+  title: ""                     # empty: use the title found in the PDF
+  doi: "10.1234/jex.2026.001"
+  contributors:
+    - {surname: Doe, given: Jane, role: author, orcid: "https://orcid.org/0000-0000-0000-0000"}
+  pub_date: {year: 2026, month: 9}
+  volume: "12"
+  issue: "3"
+  fpage: "101"
+  lpage: "115"
+  copyright: "© 2026 The Authors"
+  copyright_year: 2026
+  license_url: "https://creativecommons.org/licenses/by/4.0/"

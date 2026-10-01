@@ -1,0 +1,250 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Canonical XML schema, version 1. Mirrors the Pydantic model in src/pdf2xml/model/document.py.
+     Any change here must also update: the model, xml/serialize.py, the XSLT, golden fixtures,
+     and CLAUDE.md §7. -->
+<grammar xmlns="http://relaxng.org/ns/structure/1.0"
+         datatypeLibrary="http://www.w3.org/2001/XMLSchema-datatypes">
+
+  <start>
+    <element name="document">
+      <attribute name="version"><value>1</value></attribute>
+      <ref name="meta"/>
+      <element name="styles"><zeroOrMore><ref name="style"/></zeroOrMore></element>
+      <element name="pages">
+        <zeroOrMore>
+          <element name="page">
+            <attribute name="n"><data type="positiveInteger"/></attribute>
+            <attribute name="width"><data type="decimal"/></attribute>
+            <attribute name="height"><data type="decimal"/></attribute>
+          </element>
+        </zeroOrMore>
+      </element>
+      <element name="body"><ref name="blocks"/></element>
+      <element name="footnotes"><ref name="blocks"/></element>
+      <element name="references"><ref name="blocks"/></element>
+      <element name="artifacts">
+        <zeroOrMore>
+          <element name="artifact">
+            <attribute name="kind">
+              <choice>
+                <value>header</value><value>footer</value><value>page_number</value>
+                <value>figure_text</value><value>other</value>
+              </choice>
+            </attribute>
+            <attribute name="page"><data type="positiveInteger"/></attribute>
+            <attribute name="bbox"><ref name="bbox"/></attribute>
+            <text/>
+          </element>
+        </zeroOrMore>
+      </element>
+    </element>
+  </start>
+
+  <!-- ============================================================ meta -->
+  <define name="meta">
+    <element name="meta">
+      <element name="source"><text/></element>
+      <element name="sha256"><text/></element>
+      <element name="pages"><data type="nonNegativeInteger"/></element>
+      <element name="doc-type">
+        <choice><value>generic</value><value>paper</value><value>textbook</value><value>magazine</value></choice>
+      </element>
+      <optional><element name="title"><text/></element></optional>
+      <element name="lang"><text/></element>
+      <element name="tagged"><ref name="bool"/></element>
+      <element name="engine"><text/></element>
+      <element name="style-backend"><text/></element>
+      <optional>
+        <element name="warnings"><zeroOrMore><element name="warning"><text/></element></zeroOrMore></element>
+      </optional>
+      <optional>
+        <element name="stats">
+          <zeroOrMore>
+            <element name="stat">
+              <attribute name="name"/>
+              <attribute name="value"><data type="integer"/></attribute>
+            </element>
+          </zeroOrMore>
+        </element>
+      </optional>
+    </element>
+  </define>
+
+  <define name="style">
+    <element name="style">
+      <attribute name="id"><data type="ID"/></attribute>
+      <attribute name="font"/>
+      <attribute name="size"><data type="decimal"/></attribute>
+      <attribute name="bold"><ref name="bool"/></attribute>
+      <attribute name="italic"><ref name="bool"/></attribute>
+      <attribute name="color"><ref name="color"/></attribute>
+      <attribute name="generic">
+        <choice><value>serif</value><value>sans-serif</value><value>monospace</value></choice>
+      </attribute>
+      <optional><attribute name="small-caps"><ref name="bool"/></attribute></optional>
+      <optional><attribute name="role"/></optional>
+      <optional><attribute name="level"><data type="positiveInteger"/></attribute></optional>
+    </element>
+  </define>
+
+  <!-- ============================================================ blocks -->
+  <define name="blocks">
+    <zeroOrMore><ref name="block"/></zeroOrMore>
+  </define>
+
+  <define name="block">
+    <choice>
+      <ref name="h"/><ref name="p"/><ref name="caption"/><ref name="code"/><ref name="formula"/>
+      <ref name="list"/><ref name="table"/><ref name="figure"/><ref name="box"/>
+    </choice>
+  </define>
+
+  <define name="common">
+    <attribute name="id"><data type="ID"/></attribute>
+    <attribute name="page"><data type="positiveInteger"/></attribute>
+    <attribute name="bbox"><ref name="bbox"/></attribute>
+    <optional><attribute name="style"/></optional>
+  </define>
+
+  <define name="para">
+    <optional>
+      <attribute name="align">
+        <choice><value>left</value><value>right</value><value>center</value><value>justify</value></choice>
+      </attribute>
+    </optional>
+    <optional><attribute name="indent-first"><data type="decimal"/></attribute></optional>
+    <optional><attribute name="indent-left"><data type="decimal"/></attribute></optional>
+    <optional><attribute name="space-before"><data type="decimal"/></attribute></optional>
+    <optional><attribute name="space-after"><data type="decimal"/></attribute></optional>
+    <optional><attribute name="line-height"><data type="decimal"/></attribute></optional>
+  </define>
+
+  <define name="h">
+    <element name="h">
+      <ref name="common"/>
+      <attribute name="level">
+        <data type="positiveInteger"><param name="maxInclusive">6</param></data>
+      </attribute>
+      <ref name="para"/>
+      <ref name="inline"/>
+    </element>
+  </define>
+
+  <define name="p">
+    <element name="p"><ref name="common"/><ref name="para"/><ref name="inline"/></element>
+  </define>
+
+  <define name="caption">
+    <element name="caption">
+      <ref name="common"/>
+      <optional><attribute name="target"><data type="IDREF"/></attribute></optional>
+      <ref name="para"/>
+      <ref name="inline"/>
+    </element>
+  </define>
+
+  <define name="code">
+    <element name="code"><ref name="common"/><ref name="inline"/></element>
+  </define>
+
+  <define name="formula">
+    <element name="formula">
+      <ref name="common"/>
+      <attribute name="display"><ref name="bool"/></attribute>
+      <optional><element name="tex"><text/></element></optional>
+      <optional><element name="mathml"><text/></element></optional>
+      <optional><element name="text"><ref name="inline"/></element></optional>
+    </element>
+  </define>
+
+  <define name="list">
+    <element name="list">
+      <ref name="common"/>
+      <attribute name="ordered"><ref name="bool"/></attribute>
+      <zeroOrMore>
+        <element name="item">
+          <ref name="common"/>
+          <optional><attribute name="marker"/></optional>
+          <ref name="para"/>
+          <mixed><zeroOrMore><choice><ref name="r"/><ref name="list"/></choice></zeroOrMore></mixed>
+        </element>
+      </zeroOrMore>
+    </element>
+  </define>
+
+  <define name="table">
+    <element name="table">
+      <ref name="common"/>
+      <attribute name="cols"><data type="positiveInteger"/></attribute>
+      <optional><attribute name="caption-ref"><data type="IDREF"/></attribute></optional>
+      <zeroOrMore>
+        <element name="row">
+          <zeroOrMore>
+            <element name="cell">
+              <optional><attribute name="rowspan"><data type="positiveInteger"/></attribute></optional>
+              <optional><attribute name="colspan"><data type="positiveInteger"/></attribute></optional>
+              <optional><attribute name="header"><ref name="bool"/></attribute></optional>
+              <optional><attribute name="bbox"><ref name="bbox"/></attribute></optional>
+              <ref name="inline"/>
+            </element>
+          </zeroOrMore>
+        </element>
+      </zeroOrMore>
+    </element>
+  </define>
+
+  <define name="figure">
+    <element name="figure">
+      <ref name="common"/>
+      <optional><attribute name="src"/></optional>
+      <optional><attribute name="caption-ref"><data type="IDREF"/></attribute></optional>
+      <optional><attribute name="alt"/></optional>
+      <empty/>
+    </element>
+  </define>
+
+  <define name="box">
+    <element name="box">
+      <ref name="common"/>
+      <attribute name="role">
+        <choice>
+          <value>exercise</value><value>example</value><value>note</value><value>tip</value>
+          <value>warning</value><value>key_point</value><value>sidebar</value>
+          <value>pullquote</value><value>definition</value>
+        </choice>
+      </attribute>
+      <ref name="blocks"/>
+    </element>
+  </define>
+
+  <!-- ============================================================ inline -->
+  <define name="inline">
+    <mixed><zeroOrMore><ref name="r"/></zeroOrMore></mixed>
+  </define>
+
+  <define name="r">
+    <element name="r">
+      <optional><attribute name="b"><ref name="bool"/></attribute></optional>
+      <optional><attribute name="i"><ref name="bool"/></attribute></optional>
+      <optional><attribute name="u"><ref name="bool"/></attribute></optional>
+      <optional><attribute name="s"><ref name="bool"/></attribute></optional>
+      <optional><attribute name="sup"><ref name="bool"/></attribute></optional>
+      <optional><attribute name="sub"><ref name="bool"/></attribute></optional>
+      <optional><attribute name="sc"><ref name="bool"/></attribute></optional>
+      <optional><attribute name="color"><ref name="color"/></attribute></optional>
+      <optional><attribute name="font"/></optional>
+      <optional><attribute name="size"><data type="decimal"/></attribute></optional>
+      <optional><attribute name="href"/></optional>
+      <text/>
+    </element>
+  </define>
+
+  <!-- ============================================================ datatypes -->
+  <define name="bool"><choice><value>true</value><value>false</value></choice></define>
+  <define name="color"><data type="string"><param name="pattern">#[0-9a-f]{6}</param></data></define>
+  <define name="bbox">
+    <data type="string">
+      <param name="pattern">-?[0-9]+(\.[0-9]+)? -?[0-9]+(\.[0-9]+)? -?[0-9]+(\.[0-9]+)? -?[0-9]+(\.[0-9]+)?</param>
+    </data>
+  </define>
+</grammar>

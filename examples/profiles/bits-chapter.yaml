@@ -1,0 +1,37 @@
+# BITS 2.2, one chapter per file (book-part-wrapper). Apart from `root` these are the defaults,
+# written out so they are easy to change; delete any line you don't need.
+name: bits-chapter
+
+bits:
+  root: book-part-wrapper       # default "auto": <book> when the PDF prints a contents page or
+                                # an ISBN copyright page; "book" always writes a whole book
+  version: "2.2"                # written to @dtd-version (1.0 | 2.0 | 2.1 | 2.2)
+  doctype: official             # official | none | a full "<!DOCTYPE …>" line
+  book_part_type: chapter
+
+sections:
+  mode: auto                    # auto: levels from heading styles | style-map: use `map`
+  caps_first: true              # ALL-CAPS heads rank above same-size mixed-case heads
+  split_labels: true            # "1.1 Goals" -> <label>1.1</label><title>Goals</title>
+  sec_types: true               # Introduction -> sec-type="intro", …
+
+ids:
+  part: "ch{chapter}"
+  sec: "sec{n}"
+  table: "tab{n}"
+  fig: "fig{n}"
+  ref: "ref{n}"
+  box: "box{n}"
+  page: "page_{folio}"          # {folio}: printed page number, {page}: PDF page number
+
+labels: split                   # "Table 1.2 Title" -> <label> + <caption><title>
+matter: true                    # appendices, glossary, index, endnotes, contributor notes …
+references: true
+granular_references: true       # tag authors, year, title, source, volume, pages, DOI …
+citation_links: auto            # none | author-year | numeric | auto
+page_markers: target            # target: <target target-type="page"/> | pi: <?page-break N?> | none
+callout_links: true             # "Table 1.2", "Figure 3", "Box 2.1" -> <xref>
+ext_links: true                 # URLs and DOIs -> <ext-link>
+styling: semantic               # or keep-visual (colours kept as <styled-content>)
+queries:
+  mode: drop                    # drop | comment | pi | keep

@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pdf2xml — convert a PDF</title>
+<!--
+  Reference page for the conversion API (served at /upload). It shows the whole flow the
+  frontend implements: upload a PDF → POST /api/convert → poll GET /api/jobs/<id> → show the
+  outputs (rendered previews in an iframe, downloads). Plain HTML and JS, no build step.
+-->
+<style>
+  :root { --ink: #1d232b; --muted: #5f6b7a; --rule: #d9dee5; --bg: #f5f6f8; --card: #fff;
+          --accent: #1f5fbf; --ok: #1b7f3b; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 "Segoe UI", system-ui, sans-serif; color: var(--ink);
+         background: var(--bg); }
+  header { padding: 14px 20px; background: var(--card); border-bottom: 1px solid var(--rule);
+           display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; }
+  header h1 { font-size: 17px; margin: 0; }
+  header a { color: var(--accent); }
+  main { max-width: 1400px; margin: 0 auto; padding: 16px 20px; display: grid; gap: 16px;
+         grid-template-columns: minmax(280px, 360px) 1fr; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--rule); border-radius: 8px;
+          padding: 16px; }
+  h2 { font-size: 14px; margin: 0 0 10px; text-transform: uppercase; letter-spacing: .04em;
+       color: var(--muted); }
+  #drop { border: 2px dashed var(--rule); border-radius: 8px; padding: 22px; text-align: center;
+          cursor: pointer; color: var(--muted); }
+  #drop.over { border-color: var(--accent); background: #eef3fb; }
+  #drop strong { color: var(--ink); display: block; word-break: break-all; }
+  label { display: block; margin: 12px 0 4px; font-weight: 600; }
+  select, input[type=text] { width: 100%; padding: 6px 8px; border: 1px solid var(--rule);
+                             border-radius: 6px; font: inherit; }
+  button { margin-top: 14px; width: 100%; padding: 9px; border: 0; border-radius: 6px;
+           background: var(--accent); color: #fff; font: 600 14px inherit; cursor: pointer; }
+  button:disabled { background: #9db3d8; cursor: default; }
+  button.secondary { background: #e8ebf0; color: var(--ink); }
+  .bar { height: 8px; background: #e8ebf0; border-radius: 4px; overflow: hidden; margin: 8px 0; }
+  .bar > div { height: 100%; background: var(--accent); width: 0; transition: width .3s; }
+  .muted { color: var(--muted); }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px;
+           font-weight: 600; color: #fff; }
+  .s-ok { background: var(--ok); } .s-check { background: var(--warn); }
+  .s-invalid, .s-failed { background: var(--bad); } .s-cancelled, .s-unknown { background: #7a8594; }
+  .s-queued, .s-running { background: var(--accent); }
+  .error { color: var(--bad); white-space: pre-wrap; }
+  #jobs { list-style: none; margin: 0; padding: 0; }
+  #jobs li { padding: 6px 0; border-top: 1px solid var(--rule); cursor: pointer; }
+  #jobs li:hover { background: #f0f3f8; }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+  .tabs button { width: auto; margin: 0; padding: 6px 12px; background: #e8ebf0;
+                 color: var(--ink); }
+  .tabs button.on { background: var(--accent); color: #fff; }
+  .downloads a { margin-right: 12px; color: var(--accent); }
+  iframe { width: 100%; height: 70vh; border: 1px solid var(--rule); border-radius: 6px;
+           background: #fff; }
+</style>
+</head>
+<body>
+<header>
+  <h1>pdf2xml — convert a PDF</h1>
+  <span class="muted">Upload → Docling → S4C, BITS and JATS XML</span>
+  <a href="/">open the proof viewer</a>
+</header>
+<main>
+  <section>
+    <div class="card">
+      <h2>1. PDF</h2>
+      <div id="drop" tabindex="0">Drop a born-digital PDF here, or click to choose
+        <strong id="fname"></strong></div>
+      <input id="file" type="file" accept="application/pdf,.pdf" hidden>
+      <label for="engine">Engine</label>
+      <select id="engine">
+        <option value="docling">Docling (accurate; first run loads models ~40 s)</option>
+        <option value="heuristic">Heuristic (fast, no table detection)</option>
+      </select>
+      <label for="pages">Pages (optional)</label>
+      <input id="pages" type="text" placeholder="all, or e.g. 1-20">
+      <button id="go" disabled>Convert</button>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h2>2. Progress</h2>
+      <div id="progress" class="muted">No conversion yet.</div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h2>Recent conversions</h2>
+      <ul id="jobs"><li class="muted">None since the server started.</li></ul>
+    </div>
+  </section>
+  <section class="card">
+    <h2>3. Outputs</h2>
+    <div id="outputs" class="muted">The XML outputs appear here when the conversion is done.</div>
+  </section>
+</main>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const STAGE_NAMES = {
+  style_layer: "Reading text and styles", structure_layer: "Layout analysis (engine)",
+  merge_build: "Building the document", figures: "Cutting figures", xml: "Canonical XML",
+  epub: "EPUB", docx: "Word", bits_jats: "BITS and JATS XML", overlays: "Page images",
+};
+let file = null, current = null, timer = null;
+
+function el(tag, attrs = {}, ...kids) {           // text only: no innerHTML with server data
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") e.className = v; else if (k.startsWith("on")) e[k] = v; else e.setAttribute(k, v);
+  }
+  for (const k of kids) e.append(k);
+  return e;
+}
+
+async function api(method, url, body, headers = {}) {
+  const r = await fetch(url, { method, body, headers });
+  const data = await r.json().catch(() => ({ error: "bad_response", message: r.statusText }));
+  if (!r.ok) throw new Error(data.message || data.error || r.statusText);
+  return data;
+}
+
+// ---- 1. choose a file
+function pick(f) {
+  file = f || null;
+  $("fname").textContent = file ? `${file.name} (${(file.size / 1048576).toFixed(1)} MB)` : "";
+  $("go").disabled = !file;
+}
+$("drop").onclick = () => $("file").click();
+$("drop").onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") $("file").click(); };
+$("file").onchange = () => pick($("file").files[0]);
+for (const ev of ["dragenter", "dragover"]) $("drop").addEventListener(ev, (e) => {
+  e.preventDefault(); $("drop").classList.add("over"); });
+for (const ev of ["dragleave", "drop"]) $("drop").addEventListener(ev, (e) => {
+  e.preventDefault(); $("drop").classList.remove("over"); });
+$("drop").addEventListener("drop", (e) => pick(e.dataTransfer.files[0]));
+
+// ---- 2. upload: the raw PDF as the body, options in the query string
+$("go").onclick = async () => {
+  $("go").disabled = true;
+  const q = new URLSearchParams({ engine: $("engine").value });
+  if ($("pages").value.trim()) q.set("pages", $("pages").value.trim());
+  try {
+    const job = await api("POST", "/api/convert?" + q, file,
+      { "Content-Type": "application/pdf", "X-Filename": encodeURIComponent(file.name) });
+    follow(job.id);
+  } catch (err) {
+    $("progress").replaceChildren(el("div", { class: "error" }, "Upload refused: " + err.message));
+  } finally {
+    $("go").disabled = !file;
+  }
+};
+
+// ---- progress: poll the job until it has finished
+function follow(id) {
+  current = id;
+  clearTimeout(timer);
+  poll();
+}
+async function poll() {
+  if (!current) return;
+  let job;
+  try { job = await api("GET", "/api/jobs/" + current); }
+  catch (err) { $("progress").replaceChildren(el("div", { class: "error" }, err.message)); return; }
+  showProgress(job);
+  listJobs();
+  if (job.state === "queued" || job.state === "running") timer = setTimeout(poll, 1500);
+  else if (job.state === "done") showOutputs(job);
+}
+
+function showProgress(job) {
+  const pct = job.state === "done" ? 100 : Math.round(100 * job.stage_index / (job.stage_count + 1));
+  const kids = [
+    el("div", {}, el("span", { class: "badge s-" + job.state }, job.state), " ",
+       el("strong", {}, job.filename)),
+    el("div", { class: "bar" }, Object.assign(el("div"), { style: `width:${pct}%` })),
+  ];
+  if (job.state === "running")
+    kids.push(el("div", {}, `Step ${job.stage_index} of ${job.stage_count}: `
+      + (STAGE_NAMES[job.stage] || "starting") + ` — ${job.elapsed_s} s`));
+  if (job.state === "queued") kids.push(el("div", { class: "muted" }, "Waiting for the previous conversion."));
+  if (job.state === "failed") kids.push(el("div", { class: "error" }, job.error));
+  if (job.state === "done") kids.push(el("div", {}, `Finished in ${job.elapsed_s} s — result `,
+      el("span", { class: "badge s-" + job.result.status }, job.result.status),
+      job.result.warnings ? ` (${job.result.warnings} warnings)` : ""));
+  if (job.state === "queued" || job.state === "running")
+    kids.push(el("button", { class: "secondary", onclick: async () => {
+      try { await api("DELETE", "/api/jobs/" + job.id); poll(); } catch (e) { alert(e.message); }
+    } }, "Cancel"));
+  $("progress").replaceChildren(...kids);
+}
+
+// ---- 3. outputs: a tab per XML, previewed through the server's stylesheet
+// "S4C XML" is the project's name for the canonical XML (30_canonical.xml)
+const TABS = [["canonical_xml", "S4C XML"], ["bits", "BITS XML"], ["jats", "JATS XML"]];
+function showOutputs(job) {
+  const out = job.result.outputs;
+  const frame = el("iframe", { title: "Preview" });
+  const tabs = el("div", { class: "tabs" });
+  const open = (key, btn) => {
+    frame.src = out[key].view;
+    for (const b of tabs.children) b.classList.toggle("on", b === btn);
+  };
+  for (const [key, name] of TABS) if (out[key]) {
+    const b = el("button", {}, name);
+    b.onclick = () => open(key, b);
+    tabs.append(b);
+  }
+  const downloads = el("div", { class: "downloads" }, "Download: ");
+  for (const [key, o] of Object.entries(out))
+    downloads.append(el("a", { href: o.download, download: o.file }, o.file));
+  downloads.append(el("a", { href: job.result.report, target: "_blank" }, "report.json"));
+  $("outputs").replaceChildren(tabs, downloads, frame);
+  if (tabs.firstChild) tabs.firstChild.click();
+}
+
+// ---- recent jobs
+async function listJobs() {
+  let data;
+  try { data = await api("GET", "/api/jobs"); } catch { return; }
+  if (!data.jobs.length) return;
+  $("jobs").replaceChildren(...data.jobs.map((j) => el("li", { onclick: () => follow(j.id) },
+    el("span", { class: "badge s-" + (j.state === "done" ? j.result.status : j.state) },
+       j.state === "done" ? j.result.status : j.state), " ", j.filename,
+    el("div", { class: "muted" }, `${j.created.replace("T", " ")} · ${j.options.engine}`))));
+}
+listJobs();
+</script>
+</body>
+</html>

@@ -1,0 +1,30 @@
+from pdf2xml.model.document import (
+    SCHEMA_VERSION,
+    Artifact,
+    BBox,
+    Block,
+    Box,
+    Caption,
+    Code,
+    Document,
+    Figure,
+    Formula,
+    Heading,
+    ListBlock,
+    ListItem,
+    Meta,
+    PageInfo,
+    Paragraph,
+    ParaProps,
+    Run,
+    Style,
+    Table,
+    TableCell,
+    iter_blocks,
+)
+
+__all__ = [
+    "SCHEMA_VERSION", "Artifact", "BBox", "Block", "Box", "Caption", "Code", "Document", "Figure",
+    "Formula", "Heading", "ListBlock", "ListItem", "Meta", "PageInfo", "ParaProps", "Paragraph",
+    "Run", "Style", "Table", "TableCell", "iter_blocks",
+]

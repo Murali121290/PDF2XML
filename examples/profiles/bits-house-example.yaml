@@ -1,0 +1,27 @@
+# Example house profile: a publisher whose production system expects its own DOCTYPE,
+# ID scheme, display levels and author queries kept as comments.
+name: bits-house-example
+
+bits:
+  root: book-part-wrapper
+  version: "1.0"
+  doctype: '<!DOCTYPE book-part-wrapper PUBLIC "-//NLM//DTD BITS Book Interchange DTD v2.0 20151225//EN" "BITS-book2.dtd">'
+
+sections:
+  mode: style-map               # this book's A- and B-heads share size and weight
+  map:                          # catalogue style key (see 20_canonical.json "styles") -> depth
+    h2-2: 1
+    h2: 2
+    h4: 3
+  disp_level: "level{n}"
+
+ids:
+  part: "ch{chapter}"
+  sec: "ch{chapter}lev{level}sec{n}"
+  table: "tab{chapter}_{n}"
+  fig: "fig{chapter}_{n}"
+  ref: "bid_{chapter}_{n}"
+  box: "box{chapter}_{n}"
+
+queries:
+  mode: comment                 # <!-- AQ: … --> at the point where the query was raised

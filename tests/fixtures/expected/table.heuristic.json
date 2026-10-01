@@ -1,0 +1,427 @@
+{
+  "artifacts": [],
+  "body": [
+    {
+      "bbox": [
+        78.0,
+        82.14,
+        242.46,
+        102.14
+      ],
+      "id": "b1",
+      "level": 1,
+      "page": 1,
+      "para": {
+        "align": "left"
+      },
+      "runs": [
+        {
+          "text": "Tool Comparison"
+        }
+      ],
+      "style": "h1",
+      "type": "heading"
+    },
+    {
+      "bbox": [
+        78.0,
+        114.28,
+        286.8,
+        124.78
+      ],
+      "id": "b2",
+      "page": 1,
+      "para": {
+        "align": "left",
+        "space_before": 12.1
+      },
+      "runs": [
+        {
+          "text": "The table below lists the tools used by each layer."
+        }
+      ],
+      "style": "body",
+      "type": "paragraph"
+    },
+    {
+      "bbox": [
+        247.14,
+        139.45,
+        348.14,
+        148.45
+      ],
+      "id": "b3",
+      "page": 1,
+      "para": {
+        "align": "left",
+        "space_before": 14.7
+      },
+      "runs": [
+        {
+          "text": "Table 1. Tools and licences."
+        }
+      ],
+      "style": "caption",
+      "type": "caption"
+    },
+    {
+      "bbox": [
+        112.3,
+        161.57,
+        133.41,
+        171.57
+      ],
+      "id": "b4",
+      "level": 2,
+      "page": 1,
+      "para": {
+        "align": "left"
+      },
+      "runs": [
+        {
+          "text": "Tool"
+        }
+      ],
+      "style": "h2",
+      "type": "heading"
+    },
+    {
+      "bbox": [
+        112.3,
+        179.57,
+        145.64,
+        189.57
+      ],
+      "id": "b5",
+      "page": 1,
+      "para": {
+        "align": "left",
+        "space_before": 8.0
+      },
+      "runs": [
+        {
+          "text": "Docling"
+        }
+      ],
+      "style": "s1",
+      "type": "paragraph"
+    },
+    {
+      "bbox": [
+        112.3,
+        197.57,
+        162.32,
+        207.57
+      ],
+      "id": "b6",
+      "page": 1,
+      "para": {
+        "align": "left",
+        "space_before": 8.0
+      },
+      "runs": [
+        {
+          "text": "pdfplumber"
+        }
+      ],
+      "style": "s1",
+      "type": "paragraph"
+    },
+    {
+      "bbox": [
+        112.3,
+        215.57,
+        151.75,
+        225.57
+      ],
+      "id": "b7",
+      "page": 1,
+      "para": {
+        "align": "left",
+        "space_before": 8.0
+      },
+      "runs": [
+        {
+          "text": "GROBID"
+        }
+      ],
+      "style": "s1",
+      "type": "paragraph"
+    },
+    {
+      "bbox": [
+        78.0,
+        240.78,
+        209.22,
+        251.28
+      ],
+      "id": "b8",
+      "page": 1,
+      "para": {
+        "align": "left",
+        "space_before": 15.2
+      },
+      "runs": [
+        {
+          "text": "All three tools are open source."
+        }
+      ],
+      "style": "body",
+      "type": "paragraph"
+    },
+    {
+      "bbox": [
+        239.86,
+        161.57,
+        266.54,
+        171.57
+      ],
+      "id": "b9",
+      "level": 2,
+      "page": 1,
+      "para": {
+        "align": "left"
+      },
+      "runs": [
+        {
+          "text": "Layer"
+        }
+      ],
+      "style": "h2",
+      "type": "heading"
+    },
+    {
+      "bbox": [
+        239.86,
+        179.57,
+        280.43,
+        189.57
+      ],
+      "id": "b10",
+      "page": 1,
+      "para": {
+        "align": "left",
+        "space_before": 8.0
+      },
+      "runs": [
+        {
+          "text": "Structure"
+        }
+      ],
+      "style": "s1",
+      "type": "paragraph"
+    },
+    {
+      "bbox": [
+        239.86,
+        197.57,
+        262.09,
+        207.57
+      ],
+      "id": "b11",
+      "page": 1,
+      "para": {
+        "align": "left",
+        "space_before": 8.0
+      },
+      "runs": [
+        {
+          "text": "Style"
+        }
+      ],
+      "style": "s1",
+      "type": "paragraph"
+    },
+    {
+      "bbox": [
+        239.86,
+        215.57,
+        271.54,
+        225.57
+      ],
+      "id": "b12",
+      "page": 1,
+      "para": {
+        "align": "left",
+        "space_before": 8.0
+      },
+      "runs": [
+        {
+          "text": "Papers"
+        }
+      ],
+      "style": "s1",
+      "type": "paragraph"
+    },
+    {
+      "bbox": [
+        367.42,
+        161.57,
+        404.66,
+        171.57
+      ],
+      "id": "b13",
+      "level": 2,
+      "page": 1,
+      "para": {
+        "align": "left"
+      },
+      "runs": [
+        {
+          "text": "Licence"
+        }
+      ],
+      "style": "h2",
+      "type": "heading"
+    },
+    {
+      "bbox": [
+        367.42,
+        179.57,
+        384.64,
+        189.57
+      ],
+      "id": "b14",
+      "page": 1,
+      "para": {
+        "align": "left",
+        "space_before": 8.0
+      },
+      "runs": [
+        {
+          "text": "MIT"
+        }
+      ],
+      "style": "s1",
+      "type": "paragraph"
+    },
+    {
+      "bbox": [
+        367.42,
+        197.57,
+        384.64,
+        207.57
+      ],
+      "id": "b15",
+      "page": 1,
+      "para": {
+        "align": "left",
+        "space_before": 8.0
+      },
+      "runs": [
+        {
+          "text": "MIT"
+        }
+      ],
+      "style": "s1",
+      "type": "paragraph"
+    },
+    {
+      "bbox": [
+        367.42,
+        215.57,
+        418.56,
+        225.57
+      ],
+      "id": "b16",
+      "page": 1,
+      "para": {
+        "align": "left",
+        "space_before": 8.0
+      },
+      "runs": [
+        {
+          "text": "Apache-2.0"
+        }
+      ],
+      "style": "s1",
+      "type": "paragraph"
+    }
+  ],
+  "footnotes": [],
+  "meta": {
+    "doc_type": "generic",
+    "engine": "heuristic",
+    "lang": "en",
+    "pages": 1,
+    "schema_version": "1",
+    "sha256": "00ca160eb45483b3a6afd970dbbf9cb733cc799ff5fab5c48cc06666a633ffc7",
+    "source": "table.pdf",
+    "stats": {
+      "artifacts": 0,
+      "dehyphenated": 0,
+      "orphan_words": 0,
+      "promoted_headings": 0
+    },
+    "style_backend": "pdfplumber",
+    "tagged": false,
+    "title": "Tool Comparison",
+    "warnings": []
+  },
+  "pages": [
+    {
+      "height": 841.89,
+      "n": 1,
+      "width": 595.28
+    }
+  ],
+  "references": [],
+  "styles": {
+    "body": {
+      "bold": false,
+      "char_count": 69,
+      "color": "#000000",
+      "font": "Times New Roman",
+      "generic": "serif",
+      "italic": false,
+      "role": "body",
+      "size": 10.5,
+      "small_caps": false
+    },
+    "caption": {
+      "bold": false,
+      "char_count": 24,
+      "color": "#000000",
+      "font": "Times New Roman",
+      "generic": "serif",
+      "italic": true,
+      "role": "caption",
+      "size": 9.0,
+      "small_caps": false
+    },
+    "h1": {
+      "bold": true,
+      "char_count": 14,
+      "color": "#1a3c6e",
+      "font": "Arial",
+      "generic": "sans-serif",
+      "italic": false,
+      "level": 1,
+      "role": "heading",
+      "size": 20.0,
+      "small_caps": false
+    },
+    "h2": {
+      "bold": true,
+      "char_count": 16,
+      "color": "#000000",
+      "font": "Arial",
+      "generic": "sans-serif",
+      "italic": false,
+      "level": 2,
+      "role": "heading",
+      "size": 10.0,
+      "small_caps": false
+    },
+    "s1": {
+      "bold": false,
+      "char_count": 59,
+      "color": "#000000",
+      "font": "Arial",
+      "generic": "sans-serif",
+      "italic": false,
+      "size": 10.0,
+      "small_caps": false
+    }
+  }
+}

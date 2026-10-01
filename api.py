@@ -1,5 +1,6 @@
 import shutil
 import tempfile
+import uuid
 from pathlib import Path
 from typing import List
 
@@ -26,10 +27,11 @@ def read_root():
 
 @app.post("/convert")
 async def convert_pdf(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     engine: str = "heuristic",  # auto, docling, heuristic
     targets: str = "json,xml,epub,docx", 
-    return_xml: str | None = None, # e.g. 'jats', 'bits', 'canonical'
+    return_xml: str | None = None, # e.g. 'jats', 'bits', 'rawxml'
 ):
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported")
@@ -37,8 +39,10 @@ async def convert_pdf(
     # Parse targets
     target_list = [t.strip() for t in targets.split(",") if t.strip()]
 
-    # Create output directory
-    OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
+    # Create a unique output directory for this request to prevent race conditions
+    job_id = str(uuid.uuid4())
+    job_output_dir = OUTPUT_ROOT / job_id
+    job_output_dir.mkdir(parents=True, exist_ok=True)
     
     # Save uploaded file to a temporary location
     try:
@@ -57,26 +61,29 @@ async def convert_pdf(
         )
         
         # Run conversion
-        res = run_pipeline(temp_pdf_path, OUTPUT_ROOT, cfg)
+        res = run_pipeline(temp_pdf_path, job_output_dir, cfg)
         
         # Clean up temporary PDF file
         temp_pdf_path.unlink()
 
         if return_xml:
-            xml_file_map = {
-                "jats": "41_jats.xml",
-                "bits": "40_bits.xml",
-                "canonical": "30_canonical.xml"
+            xml_file_pattern = {
+                "jats": "*_jats.xml",
+                "bits": "*_bits.xml",
+                "rawxml": "*_canonical.xml"
             }
-            if return_xml in xml_file_map:
-                xml_path = res.out_dir / xml_file_map[return_xml]
-                if xml_path.exists():
+            if return_xml in xml_file_pattern:
+                matches = list(res.out_dir.glob(xml_file_pattern[return_xml]))
+                if matches:
+                    xml_path = matches[0]
+                    background_tasks.add_task(shutil.rmtree, job_output_dir, ignore_errors=True)
                     return FileResponse(path=xml_path, media_type="application/xml", filename=xml_path.name)
                 else:
                     raise HTTPException(status_code=404, detail=f"{return_xml} XML not found. Ensure it is included in targets.")
             else:
-                raise HTTPException(status_code=400, detail="return_xml must be 'jats', 'bits', or 'canonical'")
+                raise HTTPException(status_code=400, detail="return_xml must be 'jats', 'bits', or 'rawxml'")
 
+        background_tasks.add_task(shutil.rmtree, job_output_dir, ignore_errors=True)
         return JSONResponse(content={
             "status": "success",
             "filename": file.filename,
@@ -88,10 +95,18 @@ async def convert_pdf(
     except ConversionError as e:
         if temp_pdf_path.exists():
             temp_pdf_path.unlink()
+        shutil.rmtree(job_output_dir, ignore_errors=True)
         raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException:
+        # Re-raise intended HTTP errors (like 400 or 404) so they don't get swallowed
+        if temp_pdf_path.exists():
+            temp_pdf_path.unlink()
+        shutil.rmtree(job_output_dir, ignore_errors=True)
+        raise
     except Exception as e:
         if temp_pdf_path.exists():
             temp_pdf_path.unlink()
+        shutil.rmtree(job_output_dir, ignore_errors=True)
         raise HTTPException(status_code=500, detail=f"Unexpected error: {e}")
 
 if __name__ == "__main__":

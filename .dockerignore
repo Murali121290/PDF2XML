@@ -1,0 +1,30 @@
+# Git
+.git
+.gitignore
+
+# Python caching
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Environments
+.venv/
+venv/
+env/
+ENV/
+
+# Output directories
+out/
+output/
+
+# OS files
+.DS_Store
+
+# Editor directories
+.vscode/
+.idea/

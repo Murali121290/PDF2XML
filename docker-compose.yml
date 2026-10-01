@@ -1,0 +1,10 @@
+version: '3.8'
+
+services:
+  pdf2xml-api:
+    build: .
+    ports:
+      - "8087:8087"
+    volumes:
+      - ./out:/app/out
+    restart: unless-stopped

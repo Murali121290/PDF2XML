@@ -36,13 +36,13 @@ pip install -e ".[ml]"
 
 The project includes a standalone FastAPI application (`api.py`) for PDF conversions.
 
-1. Start the server on port 8080 (or your preferred port):
+1. Start the server on port 8087 (or your preferred port):
 ```bash
-.venv/bin/uvicorn api:app --reload --port 8080
+.venv/bin/uvicorn api:app --reload --port 8087
 ```
 
 2. Once running, explore the interactive API documentation and test file uploads directly from your browser: 
-[http://localhost:8080/docs](http://localhost:8080/docs)
+[http://localhost:8087/docs](http://localhost:8087/docs)
 
 ### API Usage Example (cURL)
 
@@ -50,7 +50,7 @@ Convert a PDF and return the raw JATS XML output directly in the response:
 
 ```bash
 curl -X 'POST' \
-  'http://localhost:8080/convert?engine=heuristic&targets=json,xml,jats,bits&return_xml=jats' \
+  'http://localhost:8087/convert?engine=heuristic&targets=json,xml,jats,bits&return_xml=jats' \
   -H 'accept: application/xml' \
   -F 'file=@/path/to/your/document.pdf'
 ```

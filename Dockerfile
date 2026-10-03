@@ -10,6 +10,12 @@ WORKDIR /app
 # Install necessary system packages (optional depending on docling/pdfplumber C dependencies)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    libgl1 \
+    libglib2.0-0 \
+    libxcb1 \
+    libxcb-cursor0 \
+    libxrender1 \
+    libxext6 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy the entire project into the container

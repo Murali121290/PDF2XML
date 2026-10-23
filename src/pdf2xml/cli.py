@@ -55,7 +55,7 @@ def convert(
         "json,xml,epub,docx,bits,jats"),
     profile: ProfileOpt = None,
     meta: MetaOpt = None,
-    engine: Annotated[str, typer.Option(help="auto | docling | heuristic")] = "auto",
+    engine: Annotated[str, typer.Option(help="auto | docling | heuristic")] = "docling",
     style_backend: Annotated[str, typer.Option(help="pdfplumber | pymupdf")] = "pdfplumber",
     pages: Annotated[str | None, typer.Option(help='Page selection, e.g. "1-3,7"')] = None,
     epub_layout: Annotated[str, typer.Option(help="reflow | fixed")] = "reflow",
@@ -162,7 +162,7 @@ def validate(
 def inspect(
     pdf: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
     out: Annotated[Path, typer.Option("--out", "-o")] = Path("out"),
-    engine: Annotated[str, typer.Option()] = "auto",
+    engine: Annotated[str, typer.Option()] = "docling",
     pages: Annotated[str | None, typer.Option()] = None,
 ) -> None:
     """Triage + overlays only: see what the pipeline detects, without exporting."""

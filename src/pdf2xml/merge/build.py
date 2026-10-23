@@ -60,7 +60,7 @@ def build_document(
 
     for mb in blocks:
         if mb.artifact is not None:
-            text = runs_text(mb.runs).strip()
+            text = _artifact_text(mb)
             if text:
                 kind = _ARTIFACT_KINDS.get(mb.artifact, "other")
                 doc.artifacts.append(Artifact(kind=kind, page=mb.page, bbox=mb.bbox, text=text))
@@ -96,22 +96,94 @@ def build_document(
             parent.items.append(block)
             parent.bbox = _union(parent.bbox, block.bbox)
             continue
-        pending_list, pending_group, list_stack = None, None, []
 
+        # footnotes and references leave the body, so a list continues past them (a list
+        # running over a page break has the page's footnotes between its items)
         if mb.kind == "footnote":
             doc.footnotes.append(block)
-        elif mb.kind == "reference":
+            continue
+        if mb.kind == "reference":
             doc.references.append(block)
-        else:
-            doc.body.append(block)
+            continue
+        pending_list, pending_group, list_stack = None, None, []
+        doc.body.append(block)
 
     doc.body = [nest_list(b) if isinstance(b, ListBlock) else b for b in doc.body]
     if layers:
+        doc.body = _missed_pictures(doc.body, doc.artifacts, layers)
         doc.body = group_boxes(doc.body, layers)
     _assign_ids(doc)
     _link_captions(doc.body)
     doc.meta.title = doc.meta.title or _title(doc.body)
     return doc
+
+
+_PIC_MIN_SIDE = 12.0      # pt: thinner is a rule or a bullet
+_PIC_MIN_AREA = 300.0     # pt²
+
+
+def _area(b: tuple[float, float, float, float]) -> float:
+    return max(0.0, b[2] - b[0]) * max(0.0, b[3] - b[1])
+
+
+def _overlap(a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> float:
+    return _area((max(a[0], b[0]), max(a[1], b[1]), min(a[2], b[2]), min(a[3], b[3])))
+
+
+def _missed_pictures(body: list[Block], artifacts: Sequence[Artifact],
+                     layers: Sequence[PageLayer]) -> list[Block]:
+    """No picture is ever dropped: an image the style layer saw that no figure or table
+    holds (the layout engine did not mark it: a cover, a plate, a photo) becomes a figure,
+    placed in reading order by its top. Not: tiny images (bullets, rules), images in a
+    running head or foot, and page backgrounds or scans with the page's text set over them
+    (the text is the content)."""
+    by_page: dict[int, list[Block]] = {}
+    for b in body:
+        by_page.setdefault(b.page, []).append(b)
+    added: list[Figure] = []
+    for layer in layers:
+        frame = layer.frame
+        blocks = by_page.get(layer.number, [])
+        holders = [b.bbox for b in iter_blocks(blocks) if isinstance(b, Figure | Table)]
+        holders += [f.bbox for f in added if f.page == layer.number]
+        holders += [a.bbox for a in artifacts if a.page == layer.number]
+        texts = [b for b in blocks if not isinstance(b, Figure | Table)]
+        for img in layer.images:
+            box = (max(img.bbox[0], frame[0]), max(img.bbox[1], frame[1]),
+                   min(img.bbox[2], frame[2]), min(img.bbox[3], frame[3]))
+            area = _area(box)
+            if (min(box[2] - box[0], box[3] - box[1]) < _PIC_MIN_SIDE or area < _PIC_MIN_AREA
+                    or any(_overlap(box, h) >= 0.5 * area for h in holders)):
+                continue
+            over = [t for t in texts if box[0] <= (t.bbox[0] + t.bbox[2]) / 2 <= box[2]
+                    and box[1] <= (t.bbox[1] + t.bbox[3]) / 2 <= box[3]]
+            if over and len(over) >= 0.5 * len(texts) and area >= 0.5 * _area(frame):
+                continue                        # the page's ground: the text is set on it
+            fig = Figure(page=layer.number, bbox=box)
+            added.append(fig)
+            holders.append(box)
+    if not added:
+        return body
+    out = list(body)
+    for fig in sorted(added, key=lambda f: (f.page, f.bbox[1], f.bbox[0])):
+        # before the first block of its page that starts below it; else after its page's last
+        # block; else after the last block of an earlier page
+        at = next((i for i, b in enumerate(out) if b.page == fig.page
+                   and b.bbox[1] >= fig.bbox[1] - 1), None)
+        if at is None:
+            at = max((i + 1 for i, b in enumerate(out) if b.page <= fig.page), default=0)
+        out.insert(at, fig)
+    return out
+
+
+def _artifact_text(mb: MBlock) -> str:
+    """All the words of a block marked as an artifact. A table's words are in its cells and
+    a figure's in ``figure_text``, not in ``runs``: reading only the runs dropped them."""
+    if mb.kind == "table":
+        return " ".join(t for _, aruns in mb.cells if (t := runs_text(aruns).strip()))
+    if mb.kind == "figure":
+        return mb.figure_text.strip()
+    return runs_text(mb.runs).strip()
 
 
 def _convert(mb: MBlock, cat: Catalogue, columns: list[tuple[float, float]]) -> Block | None:

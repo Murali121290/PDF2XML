@@ -68,6 +68,8 @@ class ExportResult:
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     stats: dict[str, int] = field(default_factory=dict)
+    # text left out on purpose: (reason, PDF page, text); text None for a whole page
+    dropped: list[tuple[str, int, str | None]] = field(default_factory=list)
 
 
 def _el(parent: etree._Element, tag: str, text: str | None = None, **attrs: str) -> etree._Element:
@@ -112,8 +114,14 @@ class _Writer:
                                keep_visual=profile.styling == "keep-visual",
                                notes=sem.note_ids)
         self.stats = {"tables": 0, "figures": 0, "lists": 0, "formulas": 0, "page_markers": 0}
+        self.dropped: list[tuple[str, int, str | None]] = []
         # pages whose marker waits for the next text (the page starts with a table, a box, …)
         self.pending: list[int] = []
+        # a book that prints one bibliography at the back: what every part without a reference
+        # list of its own cites (the citation scope of a chapter, the front and back matter)
+        self.book_refs: list[Reference] = [
+            r for m in sem.back if isinstance(m, Matter) and m.kind == "refs"
+            for r in m.references]
         self.page_by_folio: dict[str, int] = {}          # printed page number → PDF page
         for pg, f in sorted(sem.folios.items()):
             self.page_by_folio.setdefault(f.lower(), pg)
@@ -212,6 +220,8 @@ class _Writer:
             parent.append(etree.ProcessingInstruction("query", q.text.replace("?>", "? >")))
         elif mode == "keep":
             _el(parent, "p", q.text, content_type="author-query")
+        else:
+            self.dropped.append(("author query (queries.mode: drop)", q.page, q.text))
 
     def _list(self, parent: etree._Element, lb: ListBlock) -> None:
         self.stats["lists"] += 1
@@ -223,6 +233,8 @@ class _Writer:
             li = _el(el, "list-item")
             if labels and it.marker:
                 _el(li, "label", it.marker)
+            elif it.marker:
+                self.dropped.append(("list marker (given by list-type)", it.page, it.marker))
             self._inline(_el(li, "p"), it.runs, it.style, key=it)
             for ch in it.children:
                 if isinstance(ch, ListBlock):
@@ -660,7 +672,8 @@ class _Writer:
         self._abstract_kwds(bpm, u.abstract, u.abstract_title, u.keywords)
         if u.front:
             self._matters(_el(bp, "front-matter"), u.front, "front")
-        self.ctx.scope(u.references, u.note_ids)
+        refs = u.references or self.book_refs
+        self.ctx.scope(refs, u.note_ids)
         if u.preamble or u.sections or u.children:
             body = _el(bp, "body")
             self._nodes(body, u.preamble)
@@ -668,7 +681,7 @@ class _Writer:
                 self._sec(body, s)
             for c in u.children:
                 self._unit(body, c)
-            self.ctx.scope(u.references, u.note_ids)
+            self.ctx.scope(refs, u.note_ids)
         if u.footnotes or u.references or u.back:
             self._back_items(_el(bp, "back"), u.footnotes, u.references, u.ref_title, u.back)
 
@@ -858,7 +871,7 @@ class _Writer:
         root.set("dtd-version", o.version)
         self._book_meta(root)
         if sem.front:
-            self.ctx.scope([], {})
+            self.ctx.scope(self.book_refs, {})
             self._matters(_el(root, "front-matter"), sem.front, "front")
         body = _el(root, "book-body")
         for u in sem.units:
@@ -867,11 +880,11 @@ class _Writer:
             _el(_el(body, "book-part", book_part_type=o.book_part_type), "book-part-meta")
         if sem.back or sem.footnotes:
             bb = _el(root, "book-back")
-            self.ctx.scope([], {})
+            self.ctx.scope(self.book_refs, {})
             for x in sem.back:
                 if isinstance(x, Unit):
                     self._unit(bb, x)
-                    self.ctx.scope([], {})
+                    self.ctx.scope(self.book_refs, {})
                 else:
                     self._matter(bb, x, "book-back")
             if sem.footnotes:
@@ -998,17 +1011,20 @@ def export(doc: Document, out_dir: Path, target: Target, profile: Profile, meta:
     stats = {**sem.stats, **w.stats, "xrefs": w.ctx.stats["xref"],
              "ext_links": w.ctx.stats["ext-link"], "doi_pub_ids": w.ctx.stats["pub-id"]}
     warnings = list(sem.warnings)
+    dropped: list[tuple[str, int, str | None]] = [*sem.dropped, *w.dropped]
     if target == "jats" and sem.toc is not None:
         warnings = [x for x in warnings if not x.startswith("TOC:")]
         warnings.append("the printed table of contents is not written to JATS (the tag set has "
                         "no element for it)")
+        dropped.extend(("contents page (JATS has no element for it)", pg, None)
+                       for pg in sem.toc_pages)
     if w.ctx.unresolved:
         stats["citations_unresolved"] = sum(w.ctx.unresolved.values())
         names = sorted(w.ctx.unresolved, key=lambda k: (-w.ctx.unresolved[k], k))
         more = f" (+{len(names) - 12} more)" if len(names) > 12 else ""
         warnings.append(f"{len(names)} author-year citation(s) match no reference: "
                         + "; ".join(names[:12]) + more)
-    return ExportResult(target, key, path, not errors, errors, warnings, stats)
+    return ExportResult(target, key, path, not errors, errors, warnings, stats, dropped)
 
 
 def _drop_dangling(root: etree._Element) -> None:

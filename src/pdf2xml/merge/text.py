@@ -109,6 +109,11 @@ def group_lines(words: Sequence[Word], split_gap: float | None = None) -> list[L
         target = None
         for ln in reversed(lines[-4:]):
             h = ln.bottom - ln.top
+            # a raised or lowered small word (a note number) is placed by the fold below,
+            # which picks the line it overlaps most: here it would join whichever line came
+            # first, e.g. the line above the one it belongs to
+            if w.size < 0.85 * ln.size or ln.size < 0.85 * w.size:
+                continue
             if ln.top - 0.1 * h <= cy <= ln.bottom + 0.1 * h and _no_x_overlap(ln, w):
                 target = ln
                 break
@@ -117,16 +122,17 @@ def group_lines(words: Sequence[Word], split_gap: float | None = None) -> list[L
         else:
             target.words.append(w)
 
-    # Fold small-print lines (sup/sub) into an overlapping larger line.
+    # Fold small-print lines (sup/sub) into an overlapping larger line: the one they overlap
+    # most (a note number raised after a title's second line also touches its first line),
+    # then the nearest one across.
     lines.sort(key=lambda ln: ln.size, reverse=True)
     kept: list[Line] = []
     for ln in lines:
-        host = next(
-            (k for k in kept
-             if ln.size < 0.85 * k.size and ln.bottom > k.top and ln.top < k.bottom
-             and all(_no_x_overlap(k, w) for w in ln.words)),
-            None,
-        )
+        hosts = [k for k in kept
+                 if ln.size < 0.85 * k.size and ln.bottom > k.top and ln.top < k.bottom
+                 and all(_no_x_overlap(k, w) for w in ln.words)]
+        host = max(hosts, key=lambda k: (min(ln.bottom, k.bottom) - max(ln.top, k.top),
+                                         -_x_gap(k, ln)), default=None)
         if host is not None:
             host.words.extend(ln.words)
         else:
@@ -154,6 +160,12 @@ def group_lines(words: Sequence[Word], split_gap: float | None = None) -> list[L
 
 def _no_x_overlap(line: Line, w: Word) -> bool:
     return all(w.x0 >= o.x1 - 0.5 or w.x1 <= o.x0 + 0.5 for o in line.words)
+
+
+def _x_gap(line: Line, small: Line) -> float:
+    """Horizontal distance from the small line's words to the nearest word of ``line``."""
+    return min((max(0.0, w.x0 - o.x1, o.x0 - w.x1) for w in small.words for o in line.words),
+               default=0.0)
 
 
 # ---------------------------------------------------------------- runs

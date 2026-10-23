@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -57,6 +57,13 @@ def _dump(path: Path, data: Any) -> Path:
     return path
 
 
+def cache_key(sha256: str, pages: Sequence[int] | None) -> str:
+    """Separate cached layout results for different page selections of the same PDF."""
+    if not pages:
+        return sha256
+    return f"{sha256} pages={','.join(str(p) for p in sorted(set(pages)))}"
+
+
 def understand(pdf: Path, cfg: Config, out_dir: Path | None = None,
                progress: Progress | None = None) -> tuple[
         Document, StyleLayer, TriageReport, dict[str, float]]:
@@ -79,21 +86,28 @@ def understand(pdf: Path, cfg: Config, out_dir: Path | None = None,
 
     t = time.perf_counter()
     _step(progress, "structure_layer")
-    engine = get_structure_engine(cfg.engine)
+    try:
+        engine = get_structure_engine(cfg.engine, cfg.models_dir)
+    except ValueError as e:
+        raise ConversionError(str(e)) from None
     if isinstance(engine, DoclingEngine):
         cache = None
         if out_dir is not None:
             cache = out_dir / "11_structure_raw.json"
             stamp = out_dir / "11_structure_raw.sha256"
             if not (cfg.reuse_cache and stamp.exists()
-                    and stamp.read_text().strip() == report.sha256):
+                    and stamp.read_text().strip() == cache_key(report.sha256, cfg.pages)):
+                stamp.unlink(missing_ok=True)
                 cache.unlink(missing_ok=True)
         structure = engine.analyze(pdf, style, cfg.pages, cache=cache)
         if out_dir is not None:
-            (out_dir / "11_structure_raw.sha256").write_text(report.sha256)
+            (out_dir / "11_structure_raw.sha256").write_text(
+                cache_key(report.sha256, cfg.pages))
     else:
         structure = engine.analyze(pdf, style, cfg.pages)
         if out_dir is not None:
+            # Heuristic output must never be reused as cached Docling output.
+            (out_dir / "11_structure_raw.sha256").unlink(missing_ok=True)
             _dump(out_dir / "11_structure_raw.json", structure.to_dict())
     timings["structure_layer"] = time.perf_counter() - t
 

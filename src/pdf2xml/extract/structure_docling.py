@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from collections.abc import Sequence
 from functools import lru_cache
 from pathlib import Path
@@ -45,11 +46,75 @@ _LABELS: dict[str, RawKind] = {
 }
 
 
+# The models this pipeline runs (OCR, formula and picture models stay off), as
+# ``docling-tools models download layout tableformer`` lays them out in a folder.
+REQUIRED_MODELS = {
+    "layout": "docling-project--docling-layout-heron",
+    "tableformer": "docling-project--docling-models",
+}
+REQUIRED_FILES = {
+    "layout": ("config.json", "preprocessor_config.json", "model.safetensors"),
+    "tableformer": tuple(
+        f"model_artifacts/tableformer/{mode}/{name}"
+        for mode in ("fast", "accurate")
+        for name in ("tm_config.json", f"tableformer_{mode}.safetensors")
+    ),
+}
+DEFAULT_MODELS_DIR = Path(__file__).resolve().parents[3] / "models"
+CACHED_MODELS_DIR = Path.home() / ".cache" / "docling" / "models"
+MODELS_ENV = "PDF2XML_MODELS_DIR"
+
+
+def configure_offline() -> None:
+    """Conversion only reads local models; model downloads belong to the preparation step."""
+    for name in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "HF_DATASETS_OFFLINE",
+                 "HF_HUB_DISABLE_TELEMETRY", "DO_NOT_TRACK"):
+        os.environ[name] = "1"
+
+
+def missing_models(models_dir: Path) -> list[str]:
+    """What a models folder lacks for this pipeline (empty when it is usable)."""
+    if not models_dir.is_dir():
+        return [f"{models_dir} is not a folder"]
+    missing = []
+    for kind, folder in REQUIRED_MODELS.items():
+        if not (models_dir / folder).is_dir():
+            missing.append(f"{kind} model ({folder})")
+            continue
+        for filename in REQUIRED_FILES[kind]:
+            path = models_dir / folder / filename
+            if not path.is_file() or path.stat().st_size == 0:
+                missing.append(f"{kind} model file ({folder}/{filename})")
+    return missing
+
+
+def resolve_models_dir(explicit: Path | None = None) -> Path:
+    """Find complete local models without falling back to a network download."""
+    asked = explicit or (Path(os.environ[MODELS_ENV]) if os.environ.get(MODELS_ENV) else None)
+    if asked is not None:
+        missing = missing_models(asked)
+        if missing:
+            raise ValueError(f"models folder {asked}: missing {', '.join(missing)}; run "
+                             "`python tools/prepare_models.py` before starting the service. "
+                             "Runtime model downloads are disabled.")
+        return asked
+    for candidate in (DEFAULT_MODELS_DIR, CACHED_MODELS_DIR):
+        if not missing_models(candidate):
+            return candidate
+    raise ValueError(
+        "pre-downloaded Docling models not found; run `python tools/prepare_models.py` "
+        f"before starting the service, or set {MODELS_ENV} to a complete local model folder. "
+        "Runtime model downloads are disabled."
+    )
+
+
 class DoclingEngine:
     name = "docling"
 
-    def __init__(self) -> None:
+    def __init__(self, models_dir: Path | None = None) -> None:
+        configure_offline()
         self.last_raw: dict[str, Any] | None = None
+        self.models_dir = resolve_models_dir(models_dir)
 
     def analyze(
         self,
@@ -77,30 +142,43 @@ class DoclingEngine:
             layer.blocks = [b for b in layer.blocks if b.page in keep]
         return layer
 
-    @staticmethod
-    def _convert(pdf: Path, pages: Sequence[int] | None) -> Any:
+    def _convert(self, pdf: Path, pages: Sequence[int] | None) -> Any:
         kwargs: dict[str, Any] = {}
         if pages:
             kwargs["page_range"] = (min(pages), max(pages))
-        result = _converter().convert(str(pdf), **kwargs)
+        models = str(self.models_dir) if self.models_dir is not None else None
+        result = _converter(models).convert(str(pdf), **kwargs)
         return result.document
 
 
-@lru_cache(maxsize=1)
-def _converter() -> Any:
-    """One converter per process: loading the layout and table models takes ~40 s on CPU."""
-    from docling.datamodel.base_models import InputFormat
+def pipeline_options(models_dir: str | None) -> Any:
+    """Docling's PDF options: no OCR (born-digital only, CLAUDE.md §1), tables on, formula
+    and code enrichment off (Phase 3); models from ``models_dir`` when given."""
     from docling.datamodel.pipeline_options import PdfPipelineOptions
-    from docling.document_converter import DocumentConverter, PdfFormatOption
 
     opts = PdfPipelineOptions()
-    opts.do_ocr = False                   # born-digital only (CLAUDE.md §1)
+    opts.do_ocr = False
     opts.do_table_structure = True
-    opts.do_formula_enrichment = False    # Phase 3
+    opts.do_formula_enrichment = False
     opts.do_code_enrichment = False
-    return DocumentConverter(
-        format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=opts)}
-    )
+    opts.enable_remote_services = False
+    opts.allow_external_plugins = False
+    if models_dir is not None:
+        opts.artifacts_path = models_dir
+    return opts
+
+
+@lru_cache(maxsize=2)
+def _converter(models_dir: str | None = None) -> Any:
+    """One converter per process (and models folder): loading the layout and table models
+    takes ~40 s on CPU."""
+    from docling.datamodel.base_models import InputFormat
+    from docling.document_converter import DocumentConverter, PdfFormatOption
+
+    if models_dir is not None:
+        log.info("Docling models from %s", models_dir)
+    return DocumentConverter(format_options={
+        InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options(models_dir))})
 
 
 def _crop_origins(pdf: Path, doc: Any) -> dict[int, tuple[float, float]]:

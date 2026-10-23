@@ -1,6 +1,6 @@
 [project]
 name = "pdf2xml"
-version = "0.3.1"
+version = "0.5.3"
 description = "Convert born-digital PDFs to canonical JSON/XML, EPUB 3 and DOCX, keeping structure and styles."
 requires-python = ">=3.11,<3.14"
 license = { text = "Proprietary" }
@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-ml = ["docling>=2.0"]         # MIT (pulls torch)
+ml = ["docling==2.130.0"]     # MIT; version used by the 0.5.3 conversion core (pulls torch)
 
 [project.scripts]
 pdf2xml = "pdf2xml.cli:app"
@@ -33,6 +33,7 @@ dev = [
     "mypy>=1.11",
     "reportlab>=4.0",         # BSD — only used to generate test fixture PDFs
     "epubcheck>=5.1",         # bundles W3C EPUBCheck (needs Java)
+    "httpx>=0.28",           # FastAPI API compatibility tests
 ]
 
 [build-system]
@@ -64,5 +65,5 @@ implicit_reexport = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = [".", "src"]
 markers = ["slow: runs ML models (Docling); deselect with -m 'not slow'"]

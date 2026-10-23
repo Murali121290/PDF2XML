@@ -208,6 +208,25 @@ def label_only(text: str) -> bool:
     return bool(LABEL_ONLY.match(despace(text)))
 
 
+_WORD_VALUE = {w: i + 1 for i, w in enumerate(_NUM_WORDS[:20])} | {
+    "thirty": 30, "forty": 40, "fifty": 50}
+
+
+def label_number(label: str | None) -> int | None:
+    """The number in a label: "Chapter 7", "7.", "CHAPTER SEVEN", "Chapter twenty-one",
+    "Part IV". None for a section number ("2.1") or no number."""
+    if not label:
+        return None
+    t = despace(label).strip().rstrip(".:").lower()
+    t = re.sub(rf"^{_LABEL_WORD}\s+", "", t)
+    if re.fullmatch(r"\d{1,3}", t):
+        return int(t)
+    parts = re.split(r"[- ]", t)
+    if parts and all(p in _WORD_VALUE for p in parts):
+        return sum(_WORD_VALUE[p] for p in parts)
+    return roman_value(t) if re.fullmatch(r"[ivxlc]{1,6}", t) else None
+
+
 # ---------------------------------------------------------------- page numbers
 
 _ROMAN_RE = re.compile(r"^m{0,3}(cm|cd|d?c{0,3})(xc|xl|l?x{0,3})(ix|iv|v?i{0,3})$")
@@ -318,7 +337,7 @@ def _lines(blocks: Sequence[TocBlock]) -> list[_Line]:
             items(b, i)
         elif isinstance(b, Table):
             for row in b.rows:
-                cells = [list(c.runs) for c in row if runs_text(c.runs).strip()]
+                cells = [r for c in row if runs_text(r := _strip_leaders(list(c.runs))).strip()]
                 if cells:
                     out.append(_Line([r for c in cells for r in c], b.page, b.bbox, None,
                                      cells=cells, src=i))
@@ -326,6 +345,24 @@ def _lines(blocks: Sequence[TocBlock]) -> list[_Line]:
             out.append(_Line(list(b.runs), b.page, b.bbox, b.style,
                              heading=isinstance(b, Heading), src=i))
     return _split_merged(out)
+
+
+_LEAD_EDGE = re.compile(r"^[\s.·•…_]*")
+_TAIL_EDGE = re.compile(r"[\s.·•…_]*$")
+
+
+def _strip_leaders(runs: list[Run]) -> list[Run]:
+    """A table cell without the dot leaders at its edges: the layout engine may cut a
+    contents line "Why does tax matter? . . . . 1" into cells "Why does tax matter? . . ." and
+    ". . . . 1". Two leader characters at least, so a final full stop stays."""
+    text = runs_text(runs)
+    a = _LEAD_EDGE.match(text)
+    start = a.end() if a and sum(ch in ".·•…_" for ch in a.group()) >= 2 else 0
+    z = _TAIL_EDGE.search(text, start)
+    end = z.start() if z and sum(ch in ".·•…_" for ch in z.group()) >= 2 else len(text)
+    if start == 0 and end == len(text):
+        return runs
+    return trim_runs(slice_runs(runs, start, end))
 
 
 # a page number that ends one entry and the start of the next: "… Overview 2 Section 1. …"
@@ -774,11 +811,17 @@ class IndexDiv:
     entries: list[IndexEntry] = field(default_factory=list)
 
 
-_LOC = (r"(?:\d{1,4}(?:\s*[–-]\s*\d{1,4})?(?:\s*n\.?\s?\d{1,3})?[fn]?"
+# a page number, a range, a note ("45n3"); "f", "t", "n" mark a figure, a table, a note
+_LOC = (r"(?:\d{1,4}(?:\s*[–-]\s*\d{1,4})?(?:\s*n\.?\s?\d{1,3})?[fnt]?"
         r"|[ivxlc]{1,7}(?:\s*[–-]\s*[ivxlc]{1,7})?)")
 _LOCS = re.compile(rf"(?:,\s*|\s+)(?P<l>{_LOC}(?:\s*,\s*{_LOC})*)\s*\.?\s*$")
 _SEE = re.compile(r"[.;,]?\s*\(?\b(?P<k>see also|see)\b\s*(?P<v>[^)]*?)\)?\.?\s*$", re.I)
-_SPLIT_ENTRIES = re.compile(r"(?<=\d)[.;]?\s+(?!see\b)(?=[A-Za-z(“\"'‘])")
+# entries run together into one line: break after a page number ("69t astuteness"), after a
+# cross-reference's closing parenthesis ("See Anatomic analysis (AA) ABCDE rule")
+_SPLIT_ENTRIES = re.compile(r"(?:(?<=\d)|(?<=\d[fnt]))[.;]?\s+(?!see\b)(?=[A-Za-z(“\"'‘])"
+                            r"|(?<=\))\s+(?=[A-Z])")
+_LETTER_HEAD = re.compile(r"([A-Z])\s+(?=\S)")
+_LOCS_ONLY = re.compile(rf"{_LOC}(?:\s*,\s*{_LOC})*\.?")
 
 
 def _parse_index_line(runs: list[Run], page: int) -> IndexEntry | None:
@@ -790,7 +833,10 @@ def _parse_index_line(runs: list[Run], page: int) -> IndexEntry | None:
     rest = text
     m = _SEE.search(rest)
     if m and m.start() > 0:
-        targets = [t.strip() for t in re.split(r";", m.group("v")) if t.strip()]
+        v = m.group("v")
+        if v.count("(") > v.count(")") and m.group(0).rstrip(" .").endswith(")"):
+            v += ")"                  # "See Anatomic analysis (AA)": the target's own ")"
+        targets = [t.strip() for t in re.split(r";", v) if t.strip()]
         (see_also if m.group("k").lower() == "see also" else see).extend(targets)
         rest = rest[:m.start()].rstrip(" ,.;")
     locs: list[str] = []
@@ -804,10 +850,21 @@ def _parse_index_line(runs: list[Run], page: int) -> IndexEntry | None:
     return IndexEntry(term, locs, see, see_also, page=page)
 
 
-def index_entries(blocks: Sequence[Heading | Paragraph | Caption | ListBlock]) -> list[IndexDiv]:
+def index_entries(blocks: Sequence[Heading | Paragraph | Caption | ListBlock | Table | Code]
+                  ) -> list[IndexDiv]:
     """Entries of a back-of-book index: term, page numbers, "see"/"see also" cross-references,
-    sub-entries (indented), in letter groups when the index prints "A", "B" … dividers."""
-    lines = _lines(list(blocks))
+    sub-entries (indented), in letter groups when the index prints "A", "B" … dividers.
+
+    An index page the layout engine read as a table of text columns is read column by column
+    (a cell is a column of the page, many entries long); a block read as code, line by line."""
+    cols: list[TocBlock] = []
+    from_cells: set[int] = set()            # lines read from table cells: their indent is lost
+    for b in blocks:
+        parts = _index_columns(b)
+        if parts != [b]:
+            from_cells.update(range(len(cols), len(cols) + len(parts)))
+        cols.extend(parts)
+    lines = _lines(cols)
     col_min: dict[tuple[int, int], float] = {}
     col_of: dict[int, tuple[int, int]] = {}
     by_page: dict[int, list[_Line]] = {}
@@ -844,8 +901,23 @@ def index_entries(blocks: Sequence[Heading | Paragraph | Caption | ListBlock]) -
             end = start + len(piece)
             runs = slice_runs(ln.runs, max(start, 0), end) if len(pieces) > 1 else list(ln.runs)
             pos = end
+            if len(pieces) > 1 and re.fullmatch(r"[A-Z]", piece.strip()):
+                divs.append(IndexDiv(piece.strip()))      # a divider split out on its own
+                last_main = None
+                continue
+            # a letter divider run into the entries: "… 264f C Case narratives, 297"
+            hd = _LETTER_HEAD.match(piece)
+            if (hd and piece[hd.end():hd.end() + 1].upper() == hd.group(1)
+                    and hd.group(1) != divs[-1].title):
+                divs.append(IndexDiv(hd.group(1)))
+                last_main = None
+                runs = strip_prefix(runs, len(runs_text(runs)) - len(
+                    runs_text(runs).lstrip()) + hd.end())
+            # entries run together or read from table cells have lost their indent: there a
+            # sub-entry starts in lower case, a main entry with a capital
+            no_indent = len(pieces) > 1 or ln.src in from_cells
             sub = (indented and k == 0 and len(pieces) == 1) or bool(
-                re.match(r"^\s*[–—-]\s+", piece))
+                re.match(r"^\s*[–—-]\s+", piece)) or (no_indent and piece[:1].islower())
             if sub:
                 runs = strip_prefix(runs, len(runs_text(runs))
                                     - len(runs_text(runs).lstrip(" –—-")))
@@ -858,6 +930,36 @@ def index_entries(blocks: Sequence[Heading | Paragraph | Caption | ListBlock]) -
                 divs[-1].entries.append(e)
                 last_main = e
     return [d for d in divs if d.entries]
+
+
+def _index_columns(b: TocBlock) -> list[TocBlock]:
+    """A table on an index page is the page's printed columns: one paragraph per cell, column
+    after column (row order would join the left and right columns into one line). Only a
+    grid with a column of nothing but page numbers (term | pages) is read row by row."""
+    if not isinstance(b, Table) or not b.rows:
+        return [b]
+    n_cols = max(len(row) for row in b.rows)
+    out: list[TocBlock] = []
+    for col in range(n_cols):
+        texts = [runs_text(row[col].runs).strip() for row in b.rows if col < len(row)]
+        texts = [t for t in texts if t]
+        if texts and all(_LOCS_ONLY.fullmatch(t) for t in texts):
+            # term | pages: one line per row, the cells apart ("Aalto, Alvar 1, 5")
+            for row in b.rows:
+                runs: list[Run] = []
+                for c in row:
+                    if runs_text(c.runs).strip():
+                        runs.extend([Run(text=" "), *c.runs] if runs else c.runs)
+                if runs:
+                    out.append(Paragraph(page=b.page, bbox=b.bbox, style=b.style, runs=runs))
+            return out
+    for col in range(n_cols):
+        for row in b.rows:
+            if col < len(row) and runs_text(row[col].runs).strip():
+                c = row[col]
+                out.append(Paragraph(page=b.page, bbox=c.bbox or b.bbox, style=b.style,
+                                     runs=list(c.runs)))
+    return out
 
 
 # ---------------------------------------------------------------- copyright page

@@ -1,10 +1,19 @@
-version: '3.8'
-
 services:
   pdf2xml-api:
     build: .
+    init: true
     ports:
       - "8087:8087"
     volumes:
       - ./out:/app/out
+    environment:
+      PDF2XML_DATA: /app/out
+      PDF2XML_MAX_UPLOAD_MB: "${PDF2XML_MAX_UPLOAD_MB:-300}"
+      PDF2XML_CORS_ORIGINS: "${PDF2XML_CORS_ORIGINS:-}"
+      PDF2XML_MODELS_DIR: /app/models
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      HF_DATASETS_OFFLINE: "1"
+      HF_HUB_DISABLE_TELEMETRY: "1"
+    mem_limit: 8g
     restart: unless-stopped

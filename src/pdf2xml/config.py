@@ -13,7 +13,7 @@ ALL_TARGETS: list[Target] = ["json", "xml", "epub", "docx", "bits", "jats"]
 
 
 class Config(BaseModel):
-    engine: Literal["auto", "docling", "heuristic"] = "auto"
+    engine: Literal["auto", "docling", "heuristic"] = "docling"
     style_backend: Literal["pdfplumber", "pymupdf"] = os.environ.get(  # type: ignore[assignment]
         "PDF2XML_STYLE_BACKEND", "pdfplumber"
     )
@@ -28,6 +28,8 @@ class Config(BaseModel):
     assign_threshold: float = 0.5           # min share of a word's area inside a block
     lang: str = "en"
     reuse_cache: bool = True                # reuse 11_structure_raw.json if the PDF is unchanged
+    # Pre-downloaded models; otherwise PDF2XML_MODELS_DIR, project models/, or local cache.
+    models_dir: Path | None = None
 
 
 def parse_pages(spec: str | None) -> list[int] | None:

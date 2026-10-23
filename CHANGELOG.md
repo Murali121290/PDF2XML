@@ -1,5 +1,11 @@
 # Changes
 
+## API: return all XML outputs at once
+
+- Add `return_xml=all`, which returns one ZIP with `30_canonical.xml`, `40_bits.xml` and
+  `41_jats.xml` from a single conversion. It requires `xml`, `bits` and `jats` in `targets`.
+- Existing `jats`, `bits` and `rawxml` responses are unchanged.
+
 ## Offline Docling default — 2026-10-22
 
 - Make Docling the API, pipeline and CLI default while preserving the existing HTTP contract.

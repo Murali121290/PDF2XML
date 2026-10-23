@@ -82,12 +82,12 @@ The multipart field is still `file`. The existing query parameters are unchanged
 |---|---|---|
 | `engine` | `docling` | `heuristic`, `docling`, `auto` |
 | `targets` | `json,xml,epub,docx` | Comma list of `json,xml,epub,docx,bits,jats` |
-| `return_xml` | omitted | `jats`, `bits`, `rawxml`; include the corresponding target |
+| `return_xml` | omitted | `jats`, `bits`, `rawxml`; include the corresponding target. `all` returns a ZIP of `rawxml`, `bits` and `jats`, so all three must be targets |
 | `pages` | all pages | Optional 1-based selection such as `1-3,7` |
 
 Without `return_xml`, the response retains the same fields: `status`, `filename`,
 `output_directory`, `blocks`, `coverage`, and `xml_valid`. With `return_xml`, it returns
-`application/xml` directly. Errors retain FastAPI's `detail` field. Invalid options are
+`application/xml` directly (`application/zip` for `all`). Errors retain FastAPI's `detail` field. Invalid options are
 rejected with HTTP 400, and an XML target that was not requested returns HTTP 404.
 
 Temporary uploads and outputs are removed after the response, as in the previous API.

@@ -7,6 +7,7 @@ import os
 import shutil
 import tempfile
 import uuid
+import zipfile
 from collections.abc import AsyncIterator
 from concurrent.futures import ProcessPoolExecutor
 from contextlib import asynccontextmanager
@@ -64,6 +65,21 @@ def read_root() -> dict[str, str]:
     return {"message": "pdf2xml API is running. Use POST /convert to convert PDFs."}
 
 
+def _zip_xml_outputs(job_dir: Path, out_dir: Path) -> FileResponse:
+    """Bundle every XML output of one conversion into a single ZIP download."""
+    zip_path = job_dir / "pdf2xml-xml.zip"
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for _, filename in XML_OUTPUTS.values():
+            xml_path = out_dir / filename
+            if not xml_path.is_file():
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"{filename} not found. Ensure its target is included in targets.",
+                )
+            archive.write(xml_path, arcname=filename)
+    return FileResponse(path=zip_path, media_type="application/zip", filename=zip_path.name)
+
+
 def _run_conversion(pdf: Path, out: Path, cfg: Config) -> dict[str, Any]:
     """Return only serializable response metadata from the conversion process."""
     res = run_pipeline(pdf, out, cfg)
@@ -98,16 +114,18 @@ def convert_pdf(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     if return_xml:
-        if return_xml not in XML_OUTPUTS:
+        if return_xml != "all" and return_xml not in XML_OUTPUTS:
             raise HTTPException(status_code=400,
-                                detail="return_xml must be 'jats', 'bits', or 'rawxml'")
+                                detail="return_xml must be 'jats', 'bits', 'rawxml', or 'all'")
         available = set(target_list)
         if "epub" in available:
             available.add("xml")  # EPUB generation also writes canonical XML, as before.
-        if XML_OUTPUTS[return_xml][0] not in available:
+        wanted = list(XML_OUTPUTS) if return_xml == "all" else [return_xml]
+        missing = [name for name in wanted if XML_OUTPUTS[name][0] not in available]
+        if missing:
             raise HTTPException(
                 status_code=404,
-                detail=f"{return_xml} XML not found. Ensure it is included in targets.",
+                detail=f"{', '.join(missing)} XML not found. Ensure it is included in targets.",
             )
 
     job_output_dir = OUTPUT_ROOT / str(uuid.uuid4())
@@ -126,7 +144,9 @@ def convert_pdf(
         result = app.state.conversions.submit(
             _run_conversion, temp_pdf_path, job_output_dir, cfg
         ).result()
-        if return_xml:
+        if return_xml == "all":
+            response = _zip_xml_outputs(job_output_dir, Path(result["output_directory"]))
+        elif return_xml:
             xml_path = Path(result["output_directory"]) / XML_OUTPUTS[return_xml][1]
             if not xml_path.is_file():
                 raise HTTPException(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import socket
+import zipfile
 from collections.abc import Iterator
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
@@ -77,6 +78,22 @@ def test_direct_xml_response(client: TestClient, selection: str, target: str, ro
     root = etree.fromstring(response.content, etree.XMLParser(no_network=True))
     assert etree.QName(root).localname == root_tag
     assert not list(api.OUTPUT_ROOT.iterdir())
+
+
+def test_all_xml_outputs_return_one_zip(client: TestClient) -> None:
+    response = upload(client, {"targets": "jats,bits,xml", "return_xml": "all"})
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith("application/zip")
+    with zipfile.ZipFile(BytesIO(response.content)) as archive:
+        assert sorted(archive.namelist()) == ["30_canonical.xml", "40_bits.xml", "41_jats.xml"]
+        jats = etree.fromstring(archive.read("41_jats.xml"), etree.XMLParser(no_network=True))
+        assert etree.QName(jats).localname == "article"
+    assert not list(api.OUTPUT_ROOT.iterdir())
+
+
+def test_all_xml_outputs_require_every_xml_target(client: TestClient) -> None:
+    response = upload(client, {"targets": "jats,bits", "return_xml": "all"})
+    assert response.status_code == 404 and "xml" in response.json()["detail"]
 
 
 @pytest.mark.parametrize("params", [

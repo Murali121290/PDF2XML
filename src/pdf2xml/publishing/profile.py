@@ -88,6 +88,12 @@ class Profile(_Cfg):
     # tag each reference's parts (authors, year, title, source, volume, pages, DOI …) inside
     # mixed-citation; references that cannot be read stay plain text
     granular_references: bool = True
+    # with a GROBID server (`--grobid URL`): "fallback" asks it for the references the built-in
+    # reader cannot read, "prefer" for every reference, "off" never
+    grobid_references: Literal["off", "fallback", "prefer"] = "fallback"
+    # with a GROBID server: an article's or chapter's authors, affiliations, e-mails and ORCIDs,
+    # unless the metadata file names the contributors
+    grobid_header: bool = True
     # where each printed page begins: <target target-type="page"/>, <?page-break N?>, or none
     page_markers: Literal["target", "pi", "none"] = "target"
     callout_links: bool = True                          # "Table 1.2" → <xref ref-type="table">

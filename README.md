@@ -5,6 +5,11 @@ port **8087**, EPUB/DOCX exporters, and `src/pdf2xml` layout are retained. **Doc
 the default engine**, using pre-downloaded local models with runtime internet access disabled.
 Existing web-app uploads and direct XML responses continue to work.
 
+This branch includes the latest local conversion code: completeness reports, export/image/
+Unicode checks, the current job and preview APIs, and optional GROBID integration. Server
+deployment instructions are in [docs/DEVOPS.md](docs/DEVOPS.md). Deploy **`dev-Sadha`**;
+`main` is unchanged.
+
 Convert born-digital PDFs into a canonical JSON/XML document, then into EPUB 3, DOCX and the NISO publishing standards **BITS 2.2** and **JATS 1.4**. 
 
 This project includes a robust FastAPI server allowing you to run these conversions via an HTTP API.
@@ -107,6 +112,11 @@ verified local models. A build reuses weights already present in `models/`; on a
 it downloads the pinned model revisions during the build. Package installation and the base
 image also require internet access or a local mirror/cache at build time.
 
+Models are prepared in a separate Docker stage. Application-only updates reuse that stage
+on the same builder. Keep its build cache, or prepare `models/` on the host once and keep
+that directory across Git pulls. A fresh builder without local weights needs to download
+the models again; service restarts always read the files already in the image.
+
 The finished container requires **no internet for conversion**, including its first request.
 An image self-test runs with Docker networking disabled during the build. The first Docling
 request loads models from local disk; later requests reuse the same worker and converter.
@@ -133,8 +143,14 @@ The approximately 530 MB of weights are excluded from Git and copied into the im
 
 The update includes fixes for superscript placement, missed figures, chapter-opening art,
 table-of-contents parsing, shared bibliographies/endnotes, and layout cache invalidation when
-the selected pages change. Reference parsing uses the built-in parser and requires no
-external reference-processing service.
+the selected pages change. Reference parsing uses the built-in parser by default. Optional
+GROBID integration is available with `--grobid` or `PDF2XML_GROBID_URL`; leave it unset for
+fully local conversion without an external reference-processing service.
+
+Each conversion also writes `qa/completeness.json`, with a summary in `report.json`.
+The existing `/convert` JSON response fields and XML/ZIP download contract are unchanged;
+temporary conversion files are still removed after the response. Use the CLI or the
+job-based API described in `docs/HANDOVER-FRONTEND.md` when persistent reports are needed.
 
 ## Verification
 

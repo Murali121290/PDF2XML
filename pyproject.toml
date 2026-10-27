@@ -14,14 +14,14 @@ dependencies = [
     "python-docx>=1.1",       # MIT
     "typer>=0.12",            # MIT
     "pillow>=10.0",           # MIT-CMU
-    "pyyaml>=6.0",            # MIT — export profiles and metadata files
     "fastapi>=0.100",
     "uvicorn[standard]>=0.23",
     "python-multipart>=0.0.6",
+    "pyyaml>=6.0",            # MIT — export profiles and metadata files
 ]
 
 [project.optional-dependencies]
-ml = ["docling==2.130.0"]     # MIT; version used by the 0.5.3 conversion core (pulls torch)
+ml = ["docling==2.130.0"]         # MIT (pulls torch)
 
 [project.scripts]
 pdf2xml = "pdf2xml.cli:app"
@@ -29,11 +29,11 @@ pdf2xml = "pdf2xml.cli:app"
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "httpx>=0.28",
     "ruff>=0.6",
     "mypy>=1.11",
     "reportlab>=4.0",         # BSD — only used to generate test fixture PDFs
     "epubcheck>=5.1",         # bundles W3C EPUBCheck (needs Java)
-    "httpx>=0.28",           # FastAPI API compatibility tests
 ]
 
 [build-system]

@@ -1,0 +1,24 @@
+.git
+.venv
+venv
+env
+ENV
+**/__pycache__
+**/*.pyc
+**/*.pyo
+.pytest_cache
+.mypy_cache
+.ruff_cache
+**/*.egg-info
+build
+dist
+releases
+out
+output
+samples
+.env
+.env.*
+.DS_Store
+.vscode
+.idea
+# Keep models/ in the context so prepared local weights can be reused.

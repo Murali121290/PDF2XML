@@ -1,0 +1,39 @@
+# Python and tooling
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# Generated conversions, releases and private configuration
+out/
+output/
+samples/
+releases/
+*.log
+*.sqlite3
+.env
+.env.*
+!.env.example
+
+# Downloaded weights stay local; commit only the instructions and pinned manifest
+models/*
+!models/README.md
+!models/manifest.json
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo

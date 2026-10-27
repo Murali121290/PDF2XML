@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import multiprocessing
 import queue
 import re
@@ -23,17 +24,20 @@ import time
 import unicodedata
 import uuid
 from collections import deque
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from pdf2xml.config import ALL_TARGETS, Config, parse_pages
 
+log = logging.getLogger(__name__)
+
 ENGINES = ("docling", "heuristic", "auto")
 STATES = ("queued", "running", "done", "failed", "cancelled")
 # pipeline stages in the order they run (``pipeline.convert`` reports them)
 STAGES = ("style_layer", "structure_layer", "merge_build", "figures", "xml", "epub", "docx",
-          "bits_jats", "overlays")
+          "bits_jats", "completeness", "overlays")
 
 
 class JobError(Exception):
@@ -95,11 +99,14 @@ def safe_name(filename: str) -> str:
     return stem[:120].rstrip(" .") + ".pdf"
 
 
-def parse_options(raw: dict[str, str], default_engine: str) -> dict[str, Any]:
-    """Validated conversion options from query or form fields."""
+def parse_options(raw: dict[str, str], default_engine: str,
+                  engines: Sequence[str] = ENGINES, targets: Sequence[str] = ALL_TARGETS,
+                  qa: bool = True) -> dict[str, Any]:
+    """Validated conversion options from query or form fields. ``engines`` and ``targets``:
+    what this server offers (all by default); ``qa``: whether it can draw QA overlays."""
     engine = (raw.get("engine") or default_engine).strip().lower()
-    if engine not in ENGINES:
-        raise JobError(400, "bad_engine", f"engine must be one of {', '.join(ENGINES)}")
+    if engine not in engines:
+        raise JobError(400, "bad_engine", f"engine must be one of {', '.join(engines)}")
     if engine == "docling":
         from pdf2xml.extract.base import docling_available
 
@@ -107,16 +114,17 @@ def parse_options(raw: dict[str, str], default_engine: str) -> dict[str, Any]:
             raise JobError(400, "docling_missing",
                            "Docling is not installed on the server (uv sync --extra ml); "
                            "use engine=heuristic")
-    to = [t.strip() for t in (raw.get("to") or ",".join(ALL_TARGETS)).split(",") if t.strip()]
-    bad = [t for t in to if t not in ALL_TARGETS]
+    to = [t.strip() for t in (raw.get("to") or ",".join(targets)).split(",") if t.strip()]
+    bad = [t for t in to if t not in targets]
     if bad or not to:
         raise JobError(400, "bad_targets",
-                       f"to must be a comma list of {', '.join(ALL_TARGETS)}")
+                       f"to must be a comma list of {', '.join(targets)}")
     try:
         pages = parse_pages(raw.get("pages"))
     except ValueError:
         raise JobError(400, "bad_pages", 'pages must look like "1-3,7"') from None
-    overlays = (raw.get("overlays") or "true").strip().lower() not in ("0", "false", "no")
+    overlays = qa and (raw.get("overlays") or "true").strip().lower() not in ("0", "false",
+                                                                               "no")
     return {"engine": engine, "to": to, "pages": pages, "overlays": overlays}
 
 
@@ -140,6 +148,7 @@ def _worker_main(inbox: Any, events: Any) -> None:
             events.put((j, "stage", stage))
 
         try:
+            clear_outputs(Path(out_root) / Path(pdf).stem)
             convert(Path(pdf), Path(out_root), Config.model_validate(cfg), progress=progress)
         except ConversionError as e:            # rejected: encrypted, scanned …
             events.put((job_id, "failed", str(e)))
@@ -153,10 +162,23 @@ class ConversionQueue:
     """Jobs in submission order, run one at a time in a child process."""
 
     def __init__(self, out_root: Path, *, default_engine: str = "docling",
-                 max_upload_mb: int = 300) -> None:
+                 max_upload_mb: int = 300, models_dir: Path | None = None,
+                 grobid_url: str | None = None, engines: Sequence[str] = ENGINES,
+                 targets: Sequence[str] = ALL_TARGETS, qa: bool = True,
+                 views: bool = True) -> None:
+        """``models_dir``: Docling's pre-downloaded models (offline use). ``grobid_url``: a
+        GROBID server for references and article headers. ``engines``/``targets``: what a
+        job may ask for; ``qa``: QA overlays and the completeness report; ``views``: list
+        XSLT preview links in the results (off on an API-only server)."""
         self.out_root = out_root.resolve()
         self.uploads = self.out_root / "_uploads"
         self.default_engine = default_engine
+        self.models_dir = models_dir
+        self.grobid_url = grobid_url
+        self.engines = tuple(engines)
+        self.targets = tuple(targets)
+        self.qa = qa
+        self.views = views
         self.max_upload = max_upload_mb * 1024 * 1024
         self._ctx = multiprocessing.get_context("spawn")
         self._lock = threading.RLock()
@@ -172,13 +194,15 @@ class ConversionQueue:
         self._listener.start()
 
     # ------------------------------------------------------------ requests
-    def submit(self, data: bytes, filename: str, raw_options: dict[str, str]) -> Job:
+    def submit(self, data: bytes | memoryview, filename: str,
+               raw_options: dict[str, str]) -> Job:
         if len(data) > self.max_upload:
             raise JobError(413, "too_large",
                            f"the PDF is larger than {self.max_upload // (1024 * 1024)} MB")
-        if b"%PDF-" not in data[:1024]:
+        if b"%PDF-" not in bytes(data[:1024]):
             raise JobError(400, "not_pdf", "the upload is not a PDF file")
-        options = parse_options(raw_options, self.default_engine)
+        options = parse_options(raw_options, self.default_engine, self.engines, self.targets,
+                                self.qa)
         job_id = uuid.uuid4().hex[:12]
         name = safe_name(filename or "document.pdf")
         folder = self.uploads / job_id
@@ -244,54 +268,71 @@ class ConversionQueue:
         proc.join(5)
 
     def _dispatch(self) -> None:
-        """Send the next queued job to the worker when it is free (lock held)."""
-        if self._closed or self._current is not None or not self._pending:
-            return
-        job = self._jobs[self._pending.popleft()]
-        if self._proc is None or not self._proc.is_alive():
-            self._start_worker()
-        o = job.options
-        cfg = Config(engine=o["engine"], targets=o["to"], pages=o["pages"],
-                     overlays=o["overlays"])
-        self._current = job.id
-        self._inbox.put((job.id, str(job.pdf), str(self.out_root),
-                         cfg.model_dump(mode="json")))
+        """Send the next queued job to the worker when it is free (lock held). A job that
+        cannot be sent fails at once, so it never waits in "queued" for nothing."""
+        while not self._closed and self._current is None and self._pending:
+            job = self._jobs[self._pending.popleft()]
+            try:
+                if self._proc is None or not self._proc.is_alive():
+                    self._start_worker()
+                o = job.options
+                cfg = Config(engine=o["engine"], targets=o["to"], pages=o["pages"],
+                             overlays=o["overlays"], completeness=self.qa,
+                             models_dir=self.models_dir, grobid_url=self.grobid_url)
+                self._inbox.put((job.id, str(job.pdf), str(self.out_root),
+                                 cfg.model_dump(mode="json")))
+            except Exception as e:
+                log.exception("could not start job %s", job.id)
+                self._stop_worker()
+                job.state, job.finished = "failed", time.time()
+                job.started = job.started or job.finished
+                job.error = f"the conversion process could not be started: {e}"
+                continue
+            self._current = job.id
 
     def _listen(self) -> None:
-        """Apply the worker's events to the jobs; notice a worker that died."""
+        """Apply the worker's events to the jobs; notice a worker that died. An error here
+        is logged and the loop goes on: a dead listener would leave every job queued."""
         while not self._closed:
-            with self._lock:
-                events, proc, current = self._events, self._proc, self._current
-            if events is None:
-                time.sleep(0.2)
-                continue
             try:
-                job_id, kind, detail = events.get(timeout=0.5)
-            except queue.Empty:
-                with self._lock:
-                    if (current is not None and current == self._current and proc is self._proc
-                            and proc is not None and not proc.is_alive()):
-                        # forget the dead worker first: finishing starts the next job, which
-                        # starts a new worker
-                        self._proc = self._inbox = self._events = None
-                        self._finish(current, "failed",
-                                     "the conversion process stopped unexpectedly "
-                                     f"(exit code {proc.exitcode}); the PDF may be too large "
-                                     "for the available memory")
-                continue
-            except (OSError, ValueError, EOFError):
-                time.sleep(0.2)               # the queue closed under us: worker was stopped
-                continue
+                self._listen_once()
+            except Exception:
+                log.exception("job listener error")
+                time.sleep(0.2)
+
+    def _listen_once(self) -> None:
+        with self._lock:
+            events, proc, current = self._events, self._proc, self._current
+        if events is None:
+            time.sleep(0.2)
+            return
+        try:
+            job_id, kind, detail = events.get(timeout=0.5)
+        except queue.Empty:
             with self._lock:
-                job = self._jobs.get(job_id)
-                if job is None or job.state == "cancelled":
-                    continue
-                if kind == "running":
-                    job.state, job.started = "running", time.time()
-                elif kind == "stage":
-                    job.stage = detail
-                elif kind in ("done", "failed"):
-                    self._finish(job_id, kind, detail)
+                if (current is not None and current == self._current and proc is self._proc
+                        and proc is not None and not proc.is_alive()):
+                    # forget the dead worker first: finishing starts the next job, which
+                    # starts a new worker
+                    self._proc = self._inbox = self._events = None
+                    self._finish(current, "failed",
+                                 "the conversion process stopped unexpectedly "
+                                 f"(exit code {proc.exitcode}); the PDF may be too large "
+                                 "for the available memory")
+            return
+        except (OSError, ValueError, EOFError):
+            time.sleep(0.2)               # the queue closed under us: worker was stopped
+            return
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None or job.state == "cancelled":
+                return
+            if kind == "running":
+                job.state, job.started = "running", time.time()
+            elif kind == "stage":
+                job.stage = detail
+            elif kind in ("done", "failed"):
+                self._finish(job_id, kind, detail)
 
     def _finish(self, job_id: str, state: str, error: str | None) -> None:
         """Lock held."""
@@ -299,12 +340,16 @@ class ConversionQueue:
         job.state, job.finished, job.error = state, time.time(), error
         if job.started is None:
             job.started = job.finished
-        if state == "done":
-            job.stage = None
-            job.result = self.summary(job.doc)
         if self._current == job_id:
             self._current = None
-        self._dispatch()
+        try:
+            if state == "done":
+                job.stage = None
+                job.result = self.summary(job.doc)
+        except (OSError, ValueError) as e:      # an unreadable report.json
+            job.error = f"converted, but the results could not be read: {e}"
+        finally:
+            self._dispatch()
 
     # ------------------------------------------------------------ results
     def summary(self, doc: str) -> dict[str, Any]:
@@ -313,8 +358,10 @@ class ConversionQueue:
         report: dict[str, Any] = {}
         if (d / "report.json").exists():
             report = json.loads((d / "report.json").read_text(encoding="utf-8"))
-        return {"status": _status(report), "outputs": outputs(doc, d),
+        return {"status": _status(report), "outputs": outputs(doc, d, self.views),
                 "report": f"/api/report?doc={_q(doc)}",
+                # ok | info | warn | error, details in qa/completeness.json; None when not run
+                "completeness": report.get("completeness", {}).get("status"),
                 "warnings": len(report.get("warnings", [])) + sum(
                     len(e.get("warnings", [])) for e in report.get("exports", {}).values())}
 
@@ -336,13 +383,22 @@ OUTPUT_FILES: dict[str, tuple[str, str | None]] = {
 }
 
 
-def outputs(doc: str, folder: Path) -> dict[str, dict[str, str]]:
+def clear_outputs(folder: Path) -> None:
+    """Remove the outputs of an earlier conversion with the same name, so a job never lists
+    a file it did not write (e.g. a DOCX from a run that asked for it). The Docling cache
+    stays: it is checked against the PDF's hash before it is reused."""
+    for name in [*(f for f, _ in OUTPUT_FILES.values()), "report.json"]:
+        (folder / name).unlink(missing_ok=True)
+
+
+def outputs(doc: str, folder: Path, views: bool = True) -> dict[str, dict[str, str]]:
     out: dict[str, dict[str, str]] = {}
     for key, (name, sheet) in OUTPUT_FILES.items():
         if (folder / name).is_file():
             links = {"file": name, "download": f"/files/{_q(doc)}/{name}"}
             if sheet:
-                links["view"] = f"/view/{sheet}/{_q(doc)}/{name}"
+                if views:
+                    links["view"] = f"/view/{sheet}/{_q(doc)}/{name}"
                 links["source"] = f"/api/source?doc={_q(doc)}&file={name}"
                 links["validate"] = f"/api/validate?doc={_q(doc)}&file={name}"
             out[key] = links

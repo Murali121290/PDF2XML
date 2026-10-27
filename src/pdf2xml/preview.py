@@ -12,16 +12,19 @@ the XSLT, one transform at a time.
 
 from __future__ import annotations
 
+import contextlib
+import ipaddress
 import json
 import mimetypes
 import multiprocessing
 import re
 import threading
 import webbrowser
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass, field
+from email.message import Message
 from email.parser import BytesParser
 from email.policy import default as email_policy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -57,22 +60,45 @@ class _XsltWorker:
     its compiled stylesheets between requests).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, timeout: float = 300) -> None:
         self._pool: ProcessPoolExecutor | None = None
         self._lock = threading.Lock()
+        self.timeout = timeout
 
     def run(self, text: str, sheet: Path, params: dict[str, str], stamp: str) -> str:
+        result: str = self.call(_transform, text, str(sheet), params, stamp)
+        return result
+
+    def call(self, fn: Any, *args: Any) -> Any:
+        """``fn(*args)`` in the worker process (``fn`` must be picklable)."""
         with self._lock:
             if self._pool is None:
                 self._pool = ProcessPoolExecutor(
                     max_workers=1, mp_context=multiprocessing.get_context("spawn"))
-            fut = self._pool.submit(_transform, text, str(sheet), params, stamp)
+            pool = self._pool
+            fut = pool.submit(fn, *args)
         try:
-            return fut.result(timeout=300)
+            return fut.result(timeout=self.timeout)
+        except TimeoutError as e:               # a runaway transform would block every later one
+            self._reset(pool)
+            raise RuntimeError(f"the XSLT transform took longer than {self.timeout:g} s "
+                               "and was stopped") from e
         except BrokenProcessPool as e:          # the worker died: start a new one next time
-            with self._lock:
-                self._pool = None
+            self._reset(pool)
             raise RuntimeError(f"XSLT worker stopped: {e}") from e
+
+    def _reset(self, pool: ProcessPoolExecutor) -> None:
+        """Stop ``pool``'s worker; the next call starts a new one. Only the pool that failed
+        is dropped: another thread may already have replaced it."""
+        with self._lock:
+            if self._pool is pool:
+                self._pool = None
+        # the executor has no public way to stop a busy worker
+        procs: dict[int, Any] = getattr(pool, "_processes", None) or {}
+        for proc in list(procs.values()):
+            with contextlib.suppress(OSError, ValueError):
+                proc.kill()
+        pool.shutdown(wait=False, cancel_futures=True)
 
     def close(self) -> None:
         with self._lock:
@@ -311,26 +337,50 @@ def _error_page(message: str) -> str:
 
 # ---------------------------------------------------------------- HTTP
 
+def _form_parts(ctype: str, body: bytes) -> Iterator[tuple[Message, memoryview]]:
+    """The parts of a ``multipart/form-data`` body: headers, and the content as a view into
+    ``body``. Nothing is copied, so a 300 MB upload costs 300 MB, not several times that
+    (the ``email`` parser decodes the whole body to text and copies it again)."""
+    head = Message()
+    head["Content-Type"] = ctype
+    boundary = head.get_param("boundary")
+    if not isinstance(boundary, str) or not boundary:
+        raise JobError(400, "bad_form", "the multipart form has no boundary")
+    delim = b"--" + boundary.encode("latin-1")
+    view = memoryview(body)
+    pos = body.find(delim)
+    if pos < 0:
+        raise JobError(400, "bad_form", "the multipart form is empty")
+    pos += len(delim)
+    while not body.startswith(b"--", pos):          # "--boundary--" closes the form
+        if not body.startswith(b"\r\n", pos):
+            raise JobError(400, "bad_form", "the multipart form is malformed")
+        end_head = body.find(b"\r\n\r\n", pos)
+        end = body.find(b"\r\n" + delim, end_head + 4) if end_head >= 0 else -1
+        if end < 0:
+            raise JobError(400, "bad_form", "the multipart form is cut off")
+        # browsers send non-ASCII file names as raw UTF-8
+        headers = BytesParser(policy=email_policy).parsebytes(
+            bytes(body[pos + 2:end_head + 4]), headersonly=True)
+        yield headers, view[end_head + 4:end]
+        pos = end + 2 + len(delim)
+
+
 def _parse_upload(ctype: str, body: bytes, q: dict[str, str],
-                  header_name: str | None) -> tuple[bytes, str, dict[str, str]]:
+                  header_name: str | None) -> tuple[bytes | memoryview, str, dict[str, str]]:
     """The PDF, its file name and the options of a ``POST /api/convert``: either the raw PDF
     as the body (``?filename=…`` or an ``X-Filename`` header) or a multipart form with a
     ``file`` field. Options come from the query string and, for a form, its other fields."""
     fields = dict(q)
     if ctype.lower().startswith("multipart/form-data"):
-        msg = BytesParser(policy=email_policy).parsebytes(
-            b"MIME-Version: 1.0\r\nContent-Type: " + ctype.encode("latin-1") + b"\r\n\r\n"
-            + body)
-        data: bytes | None = None
+        data: memoryview | None = None
         filename = ""
-        for part in msg.iter_parts():
-            name = part.get_param("name", header="content-disposition") or ""
-            if part.get_filename() is not None or name == "file":
-                payload = part.get_payload(decode=True)
-                data = payload if isinstance(payload, bytes) else b""
-                filename = part.get_filename() or ""
+        for headers, content in _form_parts(ctype, body):
+            name = headers.get_param("name", header="content-disposition") or ""
+            if headers.get_filename() is not None or name == "file":
+                data, filename = content, headers.get_filename() or ""
             elif name:
-                fields[str(name)] = str(part.get_content()).strip()
+                fields[str(name)] = bytes(content).decode("utf-8", "replace").strip()
         if data is None:
             raise JobError(400, "no_file", "the form has no 'file' field")
         return data, filename, fields
@@ -338,8 +388,37 @@ def _parse_upload(ctype: str, body: bytes, q: dict[str, str],
     return body, filename, fields
 
 
+def host_allowed(host_header: str, names: Sequence[str] = ()) -> bool:
+    """Whether a request's ``Host`` names this server: an IP address, ``localhost``, or a name
+    the server was started with. Anything else is DNS rebinding: a web site whose name was
+    pointed at 127.0.0.1 would otherwise count as this server's own origin, and its scripts
+    could read every conversion and upload PDFs. ``"*"`` in ``names`` accepts any name: for a
+    server behind a reverse proxy or in a container, where the proxy checks the name."""
+    host = host_header.strip().lower()
+    if host.startswith("["):                          # [::1]:8765
+        host = host[1:host.find("]")] if "]" in host else ""
+    elif host.count(":") == 1:
+        host = host.rsplit(":", 1)[0]
+    if not host:
+        return False
+    if "*" in names:
+        return True
+    try:
+        ipaddress.ip_address(host)
+        return True                                   # rebinding needs a name, not an address
+    except ValueError:
+        pass
+    return host == "localhost" or host.endswith(".localhost") or host in names
+
+
+# routes of the proof viewer (web pages, XSLT rendering, QA page images); an API-only server
+# (a deployment that only converts) answers 404 for them
+_VIEW_ONLY = {"", "upload", "view", "api/stamp", "api/pages"}
+
+
 def _handler(viewer: Viewer, jobs: ConversionQueue | None = None,
-             cors: Sequence[str] = ()) -> type[BaseHTTPRequestHandler]:
+             cors: Sequence[str] = (), hosts: Sequence[str] = (),
+             api_only: bool = False) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         server_version = "pdf2xml-preview"
 
@@ -357,6 +436,35 @@ def _handler(viewer: Viewer, jobs: ConversionQueue | None = None,
             if origin in (f"http://{host}", f"https://{host}") or origin in cors or "*" in cors:
                 return origin
             return None
+
+        def _bad_host(self, as_json: bool = True) -> bool:
+            """Refuse a request whose Host is not this server (see ``host_allowed``)."""
+            if host_allowed(self.headers.get("Host", ""), hosts):
+                return False
+            self._discard_body()
+            if as_json:
+                self._error(403, "host", "unknown Host header; open the server by its address "
+                                         "or as localhost")
+            else:
+                self._send(403, "unknown Host header", "text/plain")
+            return True
+
+        def _discard_body(self) -> None:
+            """Read the body of a request refused before it was read, so the client gets the
+            answer: closing a socket with unread data resets the connection (on Windows), and
+            the client sees a connection error instead of the 403. A large body is not read;
+            the connection closes after the answer."""
+            if getattr(self, "_body_read", False):
+                return
+            self._body_read = True
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                n = 0
+            if 0 < n <= 1 << 20:
+                self.rfile.read(n)
+            elif n:
+                self.close_connection = True
 
         def _foreign(self) -> bool:
             """A write from another web site (a form or script on some page the user has
@@ -391,6 +499,9 @@ def _handler(viewer: Viewer, jobs: ConversionQueue | None = None,
             self._json({"error": code, "message": message}, status)
 
         def _parts(self) -> tuple[list[str], dict[str, str]]:
+            """The request's path and query; called first by every method, so it also starts
+            the request's state (one handler serves every request of a kept-alive connection)."""
+            self._body_read = False
             url = urlparse(self.path)
             q = {k: v[0] for k, v in parse_qs(url.query).items()}
             return [unquote(p) for p in url.path.split("/") if p], q
@@ -398,6 +509,8 @@ def _handler(viewer: Viewer, jobs: ConversionQueue | None = None,
         # ---------------------------------------------------- methods
         def do_OPTIONS(self) -> None:  # noqa: N802 (http.server naming)
             """CORS preflight for a frontend served from another origin."""
+            if self._bad_host():
+                return
             if not cors or self._allowed_origin() is None:
                 self._error(403, "origin", "this origin may not use the API")
                 return
@@ -408,9 +521,16 @@ def _handler(viewer: Viewer, jobs: ConversionQueue | None = None,
 
         def do_GET(self) -> None:  # noqa: N802 (http.server naming)
             parts, q = self._parts()
+            if self._bad_host(as_json=parts[:2] == ["api", "jobs"]):
+                return
             try:
                 if parts[:2] == ["api", "jobs"]:
                     self._jobs_get(parts)
+                elif parts == ["api", "health"]:
+                    self._json(self._health())
+                elif api_only and ("/".join(parts[:2]) in _VIEW_ONLY
+                                   or (parts[:1] or [""])[0] in _VIEW_ONLY):
+                    raise NotFound(f"{self.path} (this server only converts)")
                 else:
                     self._route(parts, q)
             except JobError as e:
@@ -424,6 +544,8 @@ def _handler(viewer: Viewer, jobs: ConversionQueue | None = None,
 
         def do_POST(self) -> None:  # noqa: N802 (http.server naming)
             parts, q = self._parts()
+            if self._bad_host():
+                return
             try:
                 if self._foreign():
                     raise JobError(403, "origin", "requests from other web sites are refused")
@@ -434,12 +556,16 @@ def _handler(viewer: Viewer, jobs: ConversionQueue | None = None,
                 else:
                     raise JobError(404, "not_found", f"no route POST {urlparse(self.path).path}")
             except JobError as e:
+                self._discard_body()
                 self._error(e.status, e.code, e.message)
             except Exception as e:                                  # keep the server up
+                self._discard_body()
                 self._error(500, "server_error", f"{type(e).__name__}: {e}")
 
         def do_DELETE(self) -> None:  # noqa: N802 (http.server naming)
             parts, _ = self._parts()
+            if self._bad_host():
+                return
             try:
                 if self._foreign():
                     raise JobError(403, "origin", "requests from other web sites are refused")
@@ -449,11 +575,21 @@ def _handler(viewer: Viewer, jobs: ConversionQueue | None = None,
                     raise JobError(404, "not_found",
                                    f"no route DELETE {urlparse(self.path).path}")
             except JobError as e:
+                self._discard_body()
                 self._error(e.status, e.code, e.message)
             except Exception as e:                                  # keep the server up
                 self._error(500, "server_error", f"{type(e).__name__}: {e}")
 
         # ---------------------------------------------------- conversion jobs
+        def _health(self) -> dict[str, Any]:
+            """For load balancers and container health checks: the server answers, and how
+            busy the queue is."""
+            from pdf2xml import __version__
+
+            states = [j.state for j in jobs.list()] if jobs is not None else []
+            return {"status": "ok", "version": __version__, "converts": jobs is not None,
+                    "queued": states.count("queued"), "running": states.count("running")}
+
         def _queue(self) -> ConversionQueue:
             if jobs is None:
                 raise JobError(503, "disabled", "conversions are not enabled on this server")
@@ -469,6 +605,7 @@ def _handler(viewer: Viewer, jobs: ConversionQueue | None = None,
                 raise JobError(413, "too_large", f"the upload is larger than "
                                                  f"{queue_.max_upload // (1024 * 1024)} MB")
             body = self.rfile.read(length)
+            self._body_read = True
             data, filename, fields = _parse_upload(self.headers.get("Content-Type", ""), body,
                                                    q, self.headers.get("X-Filename"))
             job = queue_.submit(data, filename, fields)
@@ -528,12 +665,17 @@ def _handler(viewer: Viewer, jobs: ConversionQueue | None = None,
 
 
 def make_server(viewer: Viewer, host: str = "127.0.0.1", port: int = 8765,
-                jobs: ConversionQueue | None = None,
-                cors: Sequence[str] = ()) -> ThreadingHTTPServer:
+                jobs: ConversionQueue | None = None, cors: Sequence[str] = (),
+                allowed_hosts: Sequence[str] = (), api_only: bool = False
+                ) -> ThreadingHTTPServer:
     """``jobs``: accept PDF uploads and convert them (``POST /api/convert``); without it the
     server only views existing conversions. ``cors``: origins of a frontend served elsewhere
-    (e.g. ``http://localhost:5173``) that may call the API."""
-    server = ThreadingHTTPServer((host, port), _handler(viewer, jobs, tuple(cors)))
+    (e.g. ``http://localhost:5173``) that may call the API. Requests must name the server by
+    an IP address, ``localhost``, ``host`` or one of ``allowed_hosts`` (``"*"``: any; see
+    ``host_allowed``). ``api_only``: no viewer pages or XSLT rendering, only the API."""
+    names = tuple(n.strip().lower() for n in (host, *allowed_hosts) if n.strip())
+    server = ThreadingHTTPServer((host, port), _handler(viewer, jobs, tuple(cors), names,
+                                                        api_only))
     server.daemon_threads = True
     return server
 
@@ -541,16 +683,25 @@ def make_server(viewer: Viewer, host: str = "127.0.0.1", port: int = 8765,
 def serve(root: Path, host: str = "127.0.0.1", port: int = 8765,
           sheets: list[Path] | None = None, open_browser: bool = True,
           convert: bool = True, engine: str = "docling", max_upload_mb: int = 300,
-          cors: Sequence[str] = ()) -> None:
+          cors: Sequence[str] = (), models_dir: Path | None = None,
+          grobid_url: str | None = None, allowed_hosts: Sequence[str] = (),
+          api_only: bool = False, jobs: ConversionQueue | None = None) -> None:
+    """``jobs``: a ready queue (the deploy package configures its own); else one is made
+    when ``convert`` is set."""
     viewer = Viewer(root, sheets)
-    jobs = (ConversionQueue(viewer.root, default_engine=engine, max_upload_mb=max_upload_mb)
-            if convert else None)
-    server = make_server(viewer, host, port, jobs, cors)
+    if jobs is None and convert:
+        jobs = ConversionQueue(viewer.root, default_engine=engine, max_upload_mb=max_upload_mb,
+                               models_dir=models_dir, grobid_url=grobid_url)
+    server = make_server(viewer, host, port, jobs, cors, allowed_hosts, api_only)
     url = f"http://{host}:{server.server_address[1]}/"
-    print(f"pdf2xml preview: {url}  (folder {viewer.root}; Ctrl+C to stop)", flush=True)
+    kind = "API" if api_only else "preview"
+    print(f"pdf2xml {kind}: {url}  (folder {viewer.root}; Ctrl+C to stop)", flush=True)
     if jobs is not None:
-        print(f"  upload and convert: {url}upload  (engine {engine}, "
-              f"max {max_upload_mb} MB)", flush=True)
+        page = "api/convert" if api_only else "upload"
+        print(f"  upload and convert: {url}{page}  (engine {jobs.default_engine}, "
+              f"max {jobs.max_upload // (1024 * 1024)} MB)", flush=True)
+    for name in allowed_hosts:
+        print(f"  Host allowed: {name}", flush=True)
     for origin in cors:
         print(f"  CORS allowed for {origin}", flush=True)
     for s in viewer.sheets.values():

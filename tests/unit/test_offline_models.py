@@ -49,6 +49,26 @@ def test_copy_and_verify_existing_models_without_downloads(
     assert (output / "example--model/weights.bin").read_bytes() == data
 
 
+def test_preparation_downloads_once_then_reuses_verified_local_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest_path, data = manifest(tmp_path)
+    downloads = []
+
+    def download(model, destination):
+        downloads.append((model["repo_id"], model["revision"]))
+        weights = destination / model["folder"] / "weights.bin"
+        weights.parent.mkdir(parents=True, exist_ok=True)
+        weights.write_bytes(data)
+
+    monkeypatch.setattr(prepare_models, "download_model", download)
+    output = tmp_path / "output"
+    prepare_models.prepare_models(output, manifest_path=manifest_path)
+    prepare_models.prepare_models(output, manifest_path=manifest_path)
+    prepare_models.prepare_models(output, check=True, manifest_path=manifest_path)
+    assert downloads == [("example/model", "pinned-revision")]
+
+
 def test_check_mode_rejects_missing_and_corrupt_models_without_downloads(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -16,4 +16,5 @@ services:
       HF_DATASETS_OFFLINE: "1"
       HF_HUB_DISABLE_TELEMETRY: "1"
     mem_limit: 8g
+    shm_size: '2gb'
     restart: unless-stopped

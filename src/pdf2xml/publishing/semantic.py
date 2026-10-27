@@ -13,7 +13,7 @@ from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
-from typing import Literal, TypeVar
+from typing import TYPE_CHECKING, Literal, TypeVar
 
 from pdf2xml.merge.lists import follows, marker_kind, ordered_kind
 from pdf2xml.model import (
@@ -55,6 +55,9 @@ from pdf2xml.publishing.matter import names as _names
 from pdf2xml.publishing.matter import slice_runs as _slice
 from pdf2xml.publishing.matter import trim_runs as _trim
 from pdf2xml.publishing.profile import Metadata, Profile
+
+if TYPE_CHECKING:
+    from pdf2xml.publishing.grobid import Grobid
 
 _CAPTION_LABEL = re.compile(
     r"^\s*((?:table|figure|fig\.?|box|exhibit|chart|plate|map|scheme|diagram|illustration|"
@@ -301,7 +304,7 @@ def _head_key(text: str) -> str:
 
 class _Builder:
     def __init__(self, doc: Document, profile: Profile, meta: Metadata,
-                 book: bool | None = False) -> None:
+                 book: bool | None = False, grobid: Grobid | None = None) -> None:
         """``book``: True writes a whole book (front matter, chapters, back matter), False one
         chapter or article, None decides from the document (a printed contents page or a
         copyright page with an ISBN)."""
@@ -325,6 +328,8 @@ class _Builder:
         self.rev_folio: dict[str, int] = {}       # printed page number → PDF page
         self.refs_total = 0
         self.refs_tagged = 0
+        self.grobid = grobid
+        self.refs_grobid = 0                      # references tagged from GROBID's reading
 
     # -- step 1: flat flow with floats, queries and marks resolved
     def _flow(self) -> None:
@@ -1017,9 +1022,26 @@ class _Builder:
         return merged
 
     def _parse_refs(self, refs: Sequence[Reference]) -> None:
-        """Tag reference parts using the built-in reader."""
+        """Tag each reference's parts. With a GROBID server, ``grobid_references`` "fallback"
+        asks it for the references the built-in reader cannot read, "prefer" for all of them
+        (the built-in reading stays where GROBID's fields cannot be placed on the text, and
+        adds the elements GROBID left out)."""
         for r in refs:
             r.parsed = parse_reference(r.text, self._italics(r.runs))
+        mode = self.p.grobid_references
+        if self.grobid is None or mode == "off":
+            return
+        ask = [r for r in refs if mode == "prefer" or r.parsed is None]
+        if not ask:
+            return
+        # optional, and left out of the deploy package
+        from pdf2xml.publishing.grobid import align, fill
+
+        for r, bibl in zip(ask, self.grobid.citations([r.text for r in ask]), strict=True):
+            got = align(r.text, bibl) if bibl is not None else None
+            if got is not None:
+                r.parsed = fill(got, r.parsed)
+                self.refs_grobid += 1
 
     def _italics(self, runs: Sequence[Run]) -> list[tuple[int, int]]:
         """Character ranges set in italics (body style as the base)."""
@@ -2233,6 +2255,8 @@ class _Builder:
         self.sem.stats = s
         if self.refs_total and self.p.granular_references:
             s["references_tagged"] = self.refs_tagged
+            if self.grobid is not None:
+                s["references_tagged_grobid"] = self.refs_grobid
             if self.refs_tagged < self.refs_total:
                 self.sem.warnings.append(
                     f"{self.refs_total - self.refs_tagged} of {self.refs_total} reference(s) "
@@ -2517,8 +2541,9 @@ def _pub_type(text: str) -> str:
     return "other"
 
 
-def build(doc: Document, profile: Profile, meta: Metadata, *, book: bool | None = False
-          ) -> SemanticDoc:
+def build(doc: Document, profile: Profile, meta: Metadata, *, book: bool | None = False,
+          grobid: Grobid | None = None) -> SemanticDoc:
     """``book``: True for a whole book, False for one chapter or article, None to decide from
-    the document (a printed contents page, or a copyright page with an ISBN)."""
-    return _Builder(doc, profile, meta, book).build()
+    the document (a printed contents page, or a copyright page with an ISBN). ``grobid``: a
+    GROBID server that reads the references the built-in reader cannot."""
+    return _Builder(doc, profile, meta, book, grobid).build()

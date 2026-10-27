@@ -23,13 +23,18 @@ class Config(BaseModel):
     pages: list[int] | None = None          # 1-based page numbers; None = all
     epub_layout: Literal["reflow", "fixed"] = "reflow"
     overlays: bool = True
+    completeness: bool = True               # qa/completeness.json: what the output may lack
     dehyphenate: bool = True
     image_scale: float = 2.0                # render scale for figure crops / overlays
     assign_threshold: float = 0.5           # min share of a word's area inside a block
     lang: str = "en"
     reuse_cache: bool = True                # reuse 11_structure_raw.json if the PDF is unchanged
     # Pre-downloaded models; otherwise PDF2XML_MODELS_DIR, project models/, or local cache.
+    # Missing files are an error: preparation is separate from conversion.
     models_dir: Path | None = None
+    # a GROBID server (http://localhost:8070) that reads references and article headers;
+    # None: $PDF2XML_GROBID_URL, else no GROBID
+    grobid_url: str | None = os.environ.get("PDF2XML_GROBID_URL") or None
 
 
 def parse_pages(spec: str | None) -> list[int] | None:

@@ -12,7 +12,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from lxml import etree
 
@@ -50,7 +50,10 @@ from pdf2xml.publishing.semantic import (
     build,
 )
 
-MML = "http://www.w3.org/1998/Math/MathML"
+if TYPE_CHECKING:
+    from pdf2xml.publishing.grobid import Grobid
+
+MML ="http://www.w3.org/1998/Math/MathML"
 XML_LANG = "{http://www.w3.org/XML/1998/namespace}lang"
 NSMAP = {"xlink": XLINK, "mml": MML}
 _TITLE = frozenset({"bold", "italic", "sc", "color"})   # typographic in headings and captions
@@ -982,13 +985,13 @@ def schema_key(target: Target, profile: Profile) -> str:
 
 
 def export(doc: Document, out_dir: Path, target: Target, profile: Profile, meta: Metadata,
-           path: Path | None = None) -> ExportResult:
+           path: Path | None = None, grobid: Grobid | None = None) -> ExportResult:
     key = schema_key(target, profile)
     schema = schemas.SCHEMAS[key]
     book: bool | None = False
     if target == "bits":
         book = {"book": True, "book-part-wrapper": False}.get(profile.bits.root)
-    sem = build(doc, profile, meta, book=book)
+    sem = build(doc, profile, meta, book=book, grobid=grobid)
     w = _Writer(doc, sem, profile, meta, target, schema)
     if target == "jats":
         root = w.article()
@@ -1018,6 +1021,8 @@ def export(doc: Document, out_dir: Path, target: Target, profile: Profile, meta:
                         "no element for it)")
         dropped.extend(("contents page (JATS has no element for it)", pg, None)
                        for pg in sem.toc_pages)
+    if grobid is not None:
+        warnings.extend(grobid.errors)
     if w.ctx.unresolved:
         stats["citations_unresolved"] = sum(w.ctx.unresolved.values())
         names = sorted(w.ctx.unresolved, key=lambda k: (-w.ctx.unresolved[k], k))

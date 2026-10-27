@@ -119,3 +119,18 @@ def test_paths_outside_the_output_folder_are_refused(url: str) -> None:
                  "/api/source?doc=..&file=secret.txt"):
         assert get(url + path)[0] in (400, 404), path
     assert get(url + "/files/chapter/qa/page-001.png")[0] == 200
+
+
+def test_a_transform_that_hangs_is_stopped_and_the_worker_restarts() -> None:
+    import time
+
+    from pdf2xml.preview import _XsltWorker
+
+    worker = _XsltWorker(timeout=1)
+    try:
+        with pytest.raises(RuntimeError, match="longer than 1 s"):
+            worker.call(time.sleep, 60)                # stands in for a runaway stylesheet
+        worker.timeout = 60                            # room for the new process to start
+        assert worker.call(abs, -3) == 3               # not stuck behind the hung transform
+    finally:
+        worker.close()

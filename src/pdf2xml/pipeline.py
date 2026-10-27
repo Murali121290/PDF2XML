@@ -58,7 +58,8 @@ def _dump(path: Path, data: Any) -> Path:
 
 
 def cache_key(sha256: str, pages: Sequence[int] | None) -> str:
-    """Separate cached layout results for different page selections of the same PDF."""
+    """What the Docling cache was made from: the PDF's hash, plus the pages when only some
+    were converted (a whole-document key is the bare hash, as older caches wrote it)."""
     if not pages:
         return sha256
     return f"{sha256} pages={','.join(str(p) for p in sorted(set(pages)))}"
@@ -88,7 +89,7 @@ def understand(pdf: Path, cfg: Config, out_dir: Path | None = None,
     _step(progress, "structure_layer")
     try:
         engine = get_structure_engine(cfg.engine, cfg.models_dir)
-    except ValueError as e:
+    except ValueError as e:                 # e.g. a models folder without the layout model
         raise ConversionError(str(e)) from None
     if isinstance(engine, DoclingEngine):
         cache = None
@@ -106,7 +107,7 @@ def understand(pdf: Path, cfg: Config, out_dir: Path | None = None,
     else:
         structure = engine.analyze(pdf, style, cfg.pages)
         if out_dir is not None:
-            # Heuristic output must never be reused as cached Docling output.
+            # this file is no longer Docling output: drop the stamp so Docling never reuses it
             (out_dir / "11_structure_raw.sha256").unlink(missing_ok=True)
             _dump(out_dir / "11_structure_raw.json", structure.to_dict())
     timings["structure_layer"] = time.perf_counter() - t
@@ -191,8 +192,19 @@ def convert(pdf: Path, out_root: Path, cfg: Config | None = None,
 
     if "bits" in cfg.targets or "jats" in cfg.targets:
         _step(progress, "bits_jats")
-    exports = publish(doc, out_dir, cfg, timings)
+    exports = publish(doc, out_dir, cfg, timings, pdf)
     files.update({k: r.path for k, r in exports.items()})
+
+    completeness: dict[str, Any] | None = None
+    if cfg.completeness:
+        from pdf2xml.qa import completeness as qa_completeness
+
+        t = time.perf_counter()
+        _step(progress, "completeness")
+        result = qa_completeness.check(pdf, style, doc, exports)
+        files["completeness"] = qa_completeness.write(result, out_dir)
+        completeness = qa_completeness.summary(result)
+        timings["completeness"] = time.perf_counter() - t
 
     if cfg.overlays:
         from pdf2xml.qa.overlay import render_overlays
@@ -214,14 +226,17 @@ def convert(pdf: Path, out_root: Path, cfg: Config | None = None,
         "styles": sorted(doc.styles),
         "blocks": len(doc.body),
         "exports": export_summary(exports),
+        **({"completeness": completeness} if completeness is not None else {}),
         "timings_s": {k: round(v, 3) for k, v in timings.items()},
     })
     return Result(out_dir, doc, report, coverage, xml_errors, files, timings, exports)
 
 
 def publish(doc: Document, out_dir: Path, cfg: Config,
-            timings: dict[str, float] | None = None) -> dict[str, ExportResult]:
-    """Write the BITS / JATS exports requested in ``cfg.targets``."""
+            timings: dict[str, float] | None = None,
+            pdf: Path | None = None) -> dict[str, ExportResult]:
+    """Write the BITS / JATS exports requested in ``cfg.targets``. ``pdf``: the source, for
+    GROBID's reading of the authors (a re-export without it uses ``12_grobid.json``)."""
     from pdf2xml.publishing import export, load_metadata, load_profile
 
     wanted = [t for t in ("bits", "jats") if t in cfg.targets]
@@ -229,15 +244,28 @@ def publish(doc: Document, out_dir: Path, cfg: Config,
         return {}
     profile = load_profile(cfg.profile)
     meta = load_metadata(cfg.metadata)
+    grobid = None
+    if cfg.grobid_url:
+        # imported only when asked for: the deploy package leaves GROBID out
+        from pdf2xml.publishing.grobid import CACHE_FILE, Grobid, with_authors
+
+        t = time.perf_counter()
+        grobid = Grobid(cfg.grobid_url, out_dir / CACHE_FILE, reuse=cfg.reuse_cache)
+        if profile.grobid_header and not meta.part.contributors:
+            meta = with_authors(meta, grobid.header(pdf, doc.meta.sha256), doc)
+        if timings is not None:
+            timings["grobid_header"] = time.perf_counter() - t
     out: dict[str, ExportResult] = {}
     for target in wanted:
         t = time.perf_counter()
-        res = export(doc, out_dir, target, profile, meta)
+        res = export(doc, out_dir, target, profile, meta, grobid=grobid)
         if not res.valid:
             log.error("%s export is not DTD-valid (%s): %s", target, res.schema, res.errors[:3])
         out[target] = res
         if timings is not None:
             timings[target] = time.perf_counter() - t
+    if grobid is not None:
+        grobid.save()
     return out
 
 

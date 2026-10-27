@@ -27,7 +27,14 @@ from pdf2xml.model import (
 )
 from pdf2xml.publishing import Metadata, Profile, export, load_metadata, load_profile
 from pdf2xml.publishing.inline import LinkContext, find_links
-from pdf2xml.publishing.matter import parse_imprint, parse_toc, walk_toc
+from pdf2xml.publishing.matter import (
+    IndexEntry,
+    index_entries,
+    parse_imprint,
+    parse_toc,
+    runs_text,
+    walk_toc,
+)
 from pdf2xml.publishing.schemas import validate_file
 from pdf2xml.publishing.semantic import build
 
@@ -236,6 +243,54 @@ def test_numeric_citations() -> None:
     refs = [Reference([Run(text=f"Ref {i}")], id=f"r{i}", number=i) for i in (1, 2, 3)]
     spans = find_links("as shown [1, 2–3].", LinkContext(references=refs))
     assert [(s[2], s[3]["rid"]) for s in spans] == [("xref", "r1 r2 r3")]
+
+
+def test_possessive_and_slash_named_citations() -> None:
+    from pdf2xml.publishing.semantic import Reference
+    refs = [Reference([Run(text="Logan")], id="r1", keys={("logan", "2009")}),
+            Reference([Run(text="ICTD")], id="r2",
+                      keys={("ictd", "2017"), ("ictd unu-wider", "2017")})]
+    t = "Logan’s (2009) study used ICTD/UNU-WIDER (2017) data; O’Brien (2019) did not."
+    spans = find_links(t, LinkContext(references=refs))
+    assert [(t[s[0]:s[1]], s[3]["rid"]) for s in spans if s[2] == "xref"] == [
+        ("Logan’s (2009)", "r1"), ("ICTD/UNU-WIDER (2017)", "r2")]
+
+
+def test_label_line_read_as_a_paragraph() -> None:
+    # "Chapter 2" above a heading is its label, whatever the engine called it; a bare "4" in
+    # body type is not (a stray page number), in a heading style it is
+    sem = build(doc(bh("Title", 1, "h1", 1, y=40), bp("Chapter 2", page=1, y=80),
+                    bh("Methods", 2, "h2", 1, y=100), bp("Text.", page=1, y=130),
+                    bp("4", page=1, y=180), bh("Results", 2, "h2", 1, y=200),
+                    bp("More.", page=1, y=230), bp("5", page=1, y=280, style="h2"),
+                    bh("Discussion", 2, "h2", 1, y=300), bp("End.", page=1, y=330)),
+                Profile(), Metadata())
+    assert [(s.label, runs_text(s.title)) for s in sem.sections] == [
+        ("Chapter 2", "Methods"), (None, "Results"), ("5", "Discussion")]
+    assert [runs_text(n.runs) for n in sem.sections[0].nodes] == ["Text.", "4"]  # type: ignore[union-attr]
+
+
+def test_label_numbers() -> None:
+    from pdf2xml.publishing.matter import label_number
+    assert [label_number(x) for x in ("Chapter 7", "7.", "CHAPTER SEVEN", "Chapter twenty-one",
+                                      "Part IV", "2.1", None)] == [7, 7, 7, 21, 4, None, None]
+
+
+def test_contents_table_with_leaders_in_its_cells() -> None:
+    from pdf2xml.publishing.semantic import FloatObj, _entry_like
+
+    def row(*cells: str) -> list[TableCell]:
+        return [TableCell(runs=[Run(text=c)]) for c in cells]
+
+    # the layout engine cut the dot leaders into the title and page-number cells
+    t = Table(page=5, bbox=BOX, n_cols=3, rows=[
+        row("Acknowledgements", " .  .  .  .  . ", " .  .  . ix"),
+        row("1.", "Why does tax matter?  .  .  . ", " .  .  .  .  .1"),
+        row("2.", "A new tax era in Africa?  .  .", " .  .  . 19")])
+    assert _entry_like(FloatObj("table", t))                 # counts as a contents line
+    assert [(e.label, e.text, e.folio) for e in parse_toc([t]).entries] == [
+        (None, "Acknowledgements", "ix"), ("1", "Why does tax matter?", "1"),
+        ("2", "A new tax era in Africa?", "19")]
 
 
 def test_url_split_by_line_break_is_rejoined() -> None:
@@ -572,6 +627,96 @@ def test_back_of_book_index(tmp_path: Path) -> None:
         ("1", "page_1"), ("5", "page_5")]
     assert text(top[1].find("see-also-entry")) == "planning"
     assert text(top[1].find("index-entry/term")) == "history of"      # indented: a sub-entry
+
+
+def test_index_read_from_a_table_of_page_columns() -> None:
+    def cell(t: str) -> TableCell:
+        return TableCell(runs=[Run(text=t)])
+
+    # the layout engine read an index page as a table: each column of cells is a printed
+    # column, and one cell can hold several entries run together
+    left = ["A", "AA. See Anatomic analysis (AA) ABCDE rule, 69t astuteness, 68–70",
+            "history of, 2", "B Backtrack principle, 151"]
+    right = ["Cases, 5f", "narratives, 297", "D", "Debiasing, 272"]
+    grid = Table(page=12, bbox=BOX, n_cols=2,
+                 rows=[[cell(a), cell(b)] for a, b in zip(left, right, strict=True)])
+    divs = index_entries([grid])
+
+    def shape(e: IndexEntry) -> tuple[object, ...]:
+        return (runs_text(e.term), e.locators, e.see, [runs_text(c.term) for c in e.children])
+
+    assert [(d.title, [shape(e) for e in d.entries]) for d in divs] == [
+        ("A", [("AA", [], ["Anatomic analysis (AA)"], []),
+               ("ABCDE rule", ["69t"], [], ["astuteness", "history of"])]),
+        ("B", [("Backtrack principle", ["151"], [], []),
+               ("Cases", ["5f"], [], ["narratives"])]),
+        ("D", [("Debiasing", ["272"], [], [])])]
+    # a "term | page numbers" grid is still read row by row
+    rows = Table(page=12, bbox=BOX, n_cols=2, rows=[[cell("Aalto, Alvar"), cell("1, 5")],
+                                          [cell("Design"), cell("7")]])
+    assert [shape(e) for e in index_entries([rows])[0].entries] == [
+        ("Aalto, Alvar", ["1", "5"], [], []), ("Design", ["7"], [], [])]
+
+
+def test_figure_after_a_reference_list_is_kept(tmp_path: Path) -> None:
+    # e.g. the opening art of the next chapter, printed after this chapter's references:
+    # the reference reader used to swallow it
+    fig = Figure(page=2, bbox=(100, 100, 300, 300), image="assets/art.png")
+    d = doc(h("A Chapter Title", 1, "h1"), p("Body text."), h("References", 2, "h2"),
+            ListBlock(page=1, bbox=BOX, items=[item("1.", "Smith J. A study. Nature. 2020.")]),
+            fig)
+    root = run(d, tmp_path)
+    assert [g.get(XLINK_HREF) for g in root.iter("graphic")] == ["assets/art.png"]
+    assert len(root.findall(".//ref")) == 1
+
+
+def test_chapter_opening_art_belongs_to_its_chapter(tmp_path: Path) -> None:
+    d = sample_book()
+    at = next(i for i, b in enumerate(d.body) if isinstance(b, Heading)
+              and runs_text(b.runs) == "Methods")
+    d.body[at:at] = [bh("References", 3, "h3", 10),
+                     ListBlock(page=10, bbox=BOX, items=[item("1.", "Roe J. Design. 2018.",
+                                                             page=10)]),
+                     Figure(page=11, bbox=(100, 100, 300, 300), image="assets/art.png")]
+    root = run(d, tmp_path)
+    parts = {text(bp_.find("book-part-meta/title-group/title")): bp_
+             for bp_ in root.iter("book-part")}
+    assert [g.get(XLINK_HREF) for g in parts["Methods"].iter("graphic")] == ["assets/art.png"]
+    assert not list(parts["Introduction"].iter("graphic"))
+    assert len(parts["Introduction"].findall(".//ref")) == 1
+
+
+def test_book_with_one_bibliography_and_endnotes_at_the_back(tmp_path: Path) -> None:
+    # chapter 2's label is read as a paragraph (the engine read chapter 1's as a heading); the
+    # book prints one bibliography and the notes of all chapters at the back
+    d = sample_book()
+    at = next(i for i, b in enumerate(d.body) if isinstance(b, Heading)
+              and runs_text(b.runs) == "Methods")
+    d.body[at:at + 2] = [
+        bp("Chapter 2", page=11, y=60), bh("Methods", 2, "h2", 11),
+        bp(Run(text="As Roe (2018) argued."), Run(text="1", sup=True), page=11)]
+    toc_at = next(i for i, b in enumerate(d.body) if isinstance(b, Paragraph)
+                  and runs_text(b.runs).startswith("Index ...."))
+    d.body[toc_at:toc_at] = [bp("Bibliography ........ 6", page=5, y=206),
+                             bp("Notes ........ 6", page=5, y=210)]
+    idx = next(i for i, b in enumerate(d.body) if isinstance(b, Heading)
+               and runs_text(b.runs) == "Index")
+    d.body[idx:idx] = [
+        bh("Bibliography", 2, "h2", 12, y=60),
+        ListBlock(page=12, bbox=BOX, items=[
+            item("", "Roe, J. (2018) Design futures. London: Example Press.", page=12)]),
+        bh("Notes", 2, "h2", 12, y=90), bh("Chapter 2", 3, "h3", 12, y=100),
+        bp("1 A note on the methods.", page=12, y=110)]
+    root = run(d, tmp_path)
+    methods = next(p for p in root.iter("book-part")
+                   if text(p.find("book-part-meta/title-group/title")) == "Methods")
+    assert text(methods.find("book-part-meta/title-group/label")) == "Chapter 2"
+    ref_ids = [r.get("id") for r in root.findall("book-back//ref-list/ref")]
+    assert len(ref_ids) == 1 and not methods.findall(".//ref-list")    # book-level, not ch. 2's
+    assert [x.get("rid") for x in methods.iter("xref") if x.get("ref-type") == "bibr"] == ref_ids
+    note = root.find("book-back/notes//fn")
+    assert [x.get("rid") for x in methods.iter("xref") if x.get("ref-type") == "fn"] == [
+        note.get("id")]
 
 
 def test_book_in_jats_drops_the_contents_with_a_warning(tmp_path: Path) -> None:

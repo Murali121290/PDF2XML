@@ -20,8 +20,10 @@ from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-FILES = ["pyproject.toml", "README.md", "CLAUDE.md", "CHANGELOG.md", ".gitignore", "uv.lock"]
-DIRS = ["src", "tests", "examples", "tools", "docs"]
+FILES = ["pyproject.toml", "README.md", "CLAUDE.md", "CHANGELOG.md", ".gitignore", "uv.lock",
+         "api.py", "Dockerfile", "docker-compose.yml", ".dockerignore", "requirements.txt",
+         "models/README.md", "models/manifest.json"]
+DIRS = ["src", "tests", "examples", "tools", "docs", "deploy"]
 SKIP_DIRS = {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".venv", "out",
              "samples", "releases", "dist", "build"}
 SKIP_SUFFIXES = {".pyc", ".pyo"}

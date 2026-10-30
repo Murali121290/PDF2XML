@@ -6,6 +6,7 @@ import logging
 import multiprocessing
 import os
 import shutil
+import socket
 import tempfile
 import uuid
 import zipfile
@@ -37,9 +38,25 @@ XML_OUTPUTS = {
 }
 
 
+def _get_lan_ip() -> str:
+    """Best-effort discovery of local LAN IP for terminal output."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+    except Exception:
+        return "127.0.0.1"
+
+
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     configure_offline()
+    lan_ip = _get_lan_ip()
+    port = os.environ.get("PDF2XML_PORT", "8087")
+    log.info("=" * 60)
+    log.info("🚀 Local URL:    http://localhost:%s/docs", port)
+    log.info("🌐 LAN URL:      http://%s:%s/docs", lan_ip, port)
+    log.info("=" * 60)
     log.info("pdf2xml %s: conversion error logging enabled; data=%s; models=%s",
              __version__, OUTPUT_ROOT,
              os.environ.get("PDF2XML_MODELS_DIR", "project models/ or local cache"))

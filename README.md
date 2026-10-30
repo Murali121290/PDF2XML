@@ -42,7 +42,7 @@ This project includes a robust FastAPI server allowing you to run these conversi
 
 4. **Start the API Server:**
    ```bash
-   uvicorn api:app --reload --port 8087
+   uvicorn api:app --host 0.0.0.0 --port 8087 --reload
    ```
 
 ### Windows (PowerShell)
@@ -81,9 +81,9 @@ This project includes a robust FastAPI server allowing you to run these conversi
    python tools/prepare_models.py --source D:\path\to\existing\models
    ```
 
-4. **Start the API Server:**
+4. **Start the API Server (binds to LAN & Localhost):**
    ```powershell
-   uvicorn api:app --reload --port 8087
+   uvicorn api:app --host 0.0.0.0 --port 8087 --reload
    ```
 
 This stores the layout and TableFormer models in `models/`. Conversion never downloads

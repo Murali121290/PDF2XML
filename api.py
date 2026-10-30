@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import multiprocessing
 import os
 import shutil
@@ -25,6 +26,8 @@ from pdf2xml.extract.structure_docling import configure_offline
 from pdf2xml.pipeline import ConversionError
 from pdf2xml.pipeline import convert as run_pipeline
 
+log = logging.getLogger("uvicorn.error")
+
 OUTPUT_ROOT = Path(os.environ.get("PDF2XML_DATA") or os.environ.get("PDF2XML_OUT") or "out")
 MAX_UPLOAD_BYTES = int(os.environ.get("PDF2XML_MAX_UPLOAD_MB", "300")) * 1024 * 1024
 XML_OUTPUTS = {
@@ -37,6 +40,9 @@ XML_OUTPUTS = {
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     configure_offline()
+    log.info("pdf2xml %s: conversion error logging enabled; data=%s; models=%s",
+             __version__, OUTPUT_ROOT,
+             os.environ.get("PDF2XML_MODELS_DIR", "project models/ or local cache"))
     # One persistent child keeps ML models warm and Saxon on the thread that created it.
     with ProcessPoolExecutor(
         max_workers=1, mp_context=multiprocessing.get_context("spawn")
@@ -165,9 +171,13 @@ def convert_pdf(
         shutil.rmtree(job_output_dir, ignore_errors=True)
         raise
     except ConversionError as e:
+        log.exception("Conversion failed: job=%s engine=%s targets=%s",
+                      job_output_dir.name, engine, targets)
         shutil.rmtree(job_output_dir, ignore_errors=True)
         raise HTTPException(status_code=500, detail=str(e)) from e
     except Exception as e:
+        log.exception("Unexpected conversion error: job=%s engine=%s targets=%s",
+                      job_output_dir.name, engine, targets)
         shutil.rmtree(job_output_dir, ignore_errors=True)
         raise HTTPException(status_code=500, detail=f"Unexpected error: {e}") from e
     finally:

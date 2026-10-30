@@ -1,0 +1,26 @@
+# pdf2xml conversion API. Edit the environment for your frontend, then:
+#   docker compose up -d --build
+services:
+  pdf2xml-api:
+    build: .
+    image: pdf2xml-api:${PDF2XML_VERSION:-latest}
+    init: true                      # reaps the conversion worker process; clean shutdown
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    environment:
+      # Origin(s) of the frontend when it is served from another address (comma list).
+      # Leave empty when the frontend and the API share one origin behind a reverse proxy.
+      PDF2XML_CORS_ORIGINS: "http://localhost:5173"
+      # Names clients use to reach the API (Host header). "*" accepts any name; list your
+      # domain(s) instead when the container is reachable without a proxy in front.
+      PDF2XML_ALLOWED_HOSTS: "*"
+      PDF2XML_MAX_UPLOAD_MB: "300"
+      # CPU threads for the layout model (default: all cores of the container)
+      # OMP_NUM_THREADS: "4"
+    volumes:
+      - pdf2xml-data:/data          # uploads and results; keep it across restarts
+    mem_limit: 8g                   # a 300-page book needs about 3-4 GB
+
+volumes:
+  pdf2xml-data:

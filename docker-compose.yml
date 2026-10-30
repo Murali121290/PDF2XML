@@ -8,7 +8,7 @@ services:
       - ./out:/app/out
     environment:
       PDF2XML_DATA: /app/out
-      PDF2XML_MAX_UPLOAD_MB: "${PDF2XML_MAX_UPLOAD_MB:-300}"
+      PDF2XML_MAX_UPLOAD_MB: "${PDF2XML_MAX_UPLOAD_MB:-1024}"
       PDF2XML_CORS_ORIGINS: "${PDF2XML_CORS_ORIGINS:-}"
       PDF2XML_MODELS_DIR: /app/models
       HF_HUB_OFFLINE: "1"
@@ -16,5 +16,4 @@ services:
       HF_DATASETS_OFFLINE: "1"
       HF_HUB_DISABLE_TELEMETRY: "1"
     mem_limit: 8g
-    shm_size: '2gb'
     restart: unless-stopped

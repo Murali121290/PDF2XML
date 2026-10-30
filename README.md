@@ -20,35 +20,71 @@ This project includes a robust FastAPI server allowing you to run these conversi
 
 ## Installation
 
-### 1. Create and Activate a Virtual Environment
+### Linux / macOS
 
-Ensure you are using a supported Python version when creating your virtual environment:
+1. **Create and Activate a Virtual Environment:**
+   ```bash
+   python3.11 -m venv .venv
+   source .venv/bin/activate
+   ```
 
-```bash
-python3.13 -m venv .venv
-source .venv/bin/activate
-```
+2. **Install Dependencies:**
+   ```bash
+   pip install --upgrade pip
+   pip install -r requirements.txt
+   pip install -e ".[ml]"
+   ```
 
-### 2. Install Dependencies
+3. **Prepare Models Once:**
+   ```bash
+   python tools/prepare_models.py
+   ```
 
-Install the project with Docling, FastAPI and Uvicorn:
+4. **Start the API Server:**
+   ```bash
+   uvicorn api:app --reload --port 8087
+   ```
 
-```bash
-pip install -e ".[ml]"
-```
+### Windows (PowerShell)
 
-### 3. Prepare Models Once
+> [!IMPORTANT]
+> - Ensure **Python 3.11, 3.12, or 3.13** is installed (`winget install Python.Python.3.11`). Python 3.14 is currently not supported.
+> - Ensure **Microsoft Visual C++ Redistributable (x64)** is installed (`winget install --id Microsoft.VCRedist.2015+.x64 -e`). This is required by native packages like `lxml`, `pikepdf`, and `pydantic-core`.
 
-With internet available during setup, download and verify the pinned models:
-```bash
-python tools/prepare_models.py
-```
+1. **Create and Activate a Virtual Environment:**
+   ```powershell
+   py -3.11 -m venv .venv
+   .\.venv\Scripts\Activate.ps1
+   ```
+   *(If script execution is disabled in PowerShell, first run: `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser`)*
 
-If you already have the models, copy and verify them without internet access:
+2. **Install Dependencies:**
+   ```powershell
+   python -m pip install --upgrade pip
+   pip install -r requirements.txt
+   pip install -e ".[ml]"
+   ```
 
-```bash
-python tools/prepare_models.py --source /path/to/existing/models
-```
+   > [!TIP]
+   > If you encounter dependency conflicts with Pillow or compiled packages on Windows, lock Pillow to `<13`:
+   > ```powershell
+   > pip install "pillow>=10.0.0,<13.0.0"
+   > ```
+
+3. **Prepare Models Once:**
+   ```powershell
+   python tools/prepare_models.py
+   ```
+
+   If you already have the models, copy and verify them without internet access:
+   ```powershell
+   python tools/prepare_models.py --source D:\path\to\existing\models
+   ```
+
+4. **Start the API Server:**
+   ```powershell
+   uvicorn api:app --reload --port 8087
+   ```
 
 This stores the layout and TableFormer models in `models/`. Conversion never downloads
 models. Missing or incomplete local models produce an error instead of a network fallback.

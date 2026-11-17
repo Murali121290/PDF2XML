@@ -13,7 +13,7 @@ from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
-from typing import Literal, TypeVar
+from typing import TYPE_CHECKING, Literal, TypeVar
 
 from pdf2xml.merge.lists import follows, marker_kind, ordered_kind
 from pdf2xml.model import (
@@ -56,8 +56,11 @@ from pdf2xml.publishing.matter import slice_runs as _slice
 from pdf2xml.publishing.matter import trim_runs as _trim
 from pdf2xml.publishing.profile import Metadata, Profile
 
+if TYPE_CHECKING:
+    from pdf2xml.publishing.grobid import Grobid
+
 _CAPTION_LABEL = re.compile(
-    r"^\s*((?:table|figure|fig\.?|box|exhibit|chart|plate|map|scheme|diagram|illustration|"
+    r"^\s*[\u25b2\u25b3\u25b6\u25ba]?\s*((?:table|figure|fig\.?|box|exhibit|chart|plate|map|scheme|diagram|illustration|"
     r"photo|panel)\s*[A-Z]?\d+(?:[.\-–]\d+)*[a-z]?)(?:\s*[.:—–|]\s*|\s+|$)",
     re.I,
 )
@@ -84,6 +87,9 @@ _SEC_TYPES = {
     "results": "results", "discussion": "discussion", "results and discussion":
     "results|discussion", "conclusion": "conclusions", "conclusions": "conclusions",
     "case report": "cases", "case study": "cases",
+    "summary": "summary", "case studies": "case-studies",
+    "practice questions": "practice-questions", "reflection": "reflection",
+    "key terms": "key-terms", "discussion and short answer": "discussion-questions",
 }
 
 
@@ -196,6 +202,7 @@ class Matter:
     children: list[Matter] = field(default_factory=list)        # appendices in "Appendices"
     id: str = ""
     page: int = 0
+    ref_title: list[Run] = field(default_factory=list)
 
 
 @dataclass
@@ -256,6 +263,10 @@ class SemanticDoc:
     page_ids: dict[int, str] = field(default_factory=dict)   # PDF page → XML id of its marker
     warnings: list[str] = field(default_factory=list)
     stats: dict[str, int] = field(default_factory=dict)
+    # text left out on purpose, so the completeness check can tell it from text that was lost:
+    # (reason, PDF page, text); text "" for something without text (a small mark)
+    dropped: list[tuple[str, int, str]] = field(default_factory=list)
+    toc_pages: list[int] = field(default_factory=list)       # pages of the printed contents
     # ---- books: front matter, chapters and back matter (``book``); a chapter or article keeps
     # its body in ``preamble``/``sections`` and its back matter in ``back``
     book: bool = False
@@ -280,7 +291,7 @@ class SemanticDoc:
 def label_key(label: str) -> str:
     """"TABLE 11.1" / "Fig. 2" → "table 11.1" / "figure 2" (used to resolve callouts)."""
     k = re.sub(r"\s+", " ", label.strip().lower()).rstrip(".:")
-    k = re.sub(r"^figs?\.?\s*", "figure ", k)
+    k = re.sub(r"^figs?\.?\s+", "figure ", k)
     k = re.sub(r"^(tables|figures|boxes)\b", lambda m: m.group(1)[:-1] if m.group(1) != "boxes"
                else "box", k)
     return re.sub(r"\s*[–-]\s*", "-", k)
@@ -297,7 +308,7 @@ def _head_key(text: str) -> str:
 
 class _Builder:
     def __init__(self, doc: Document, profile: Profile, meta: Metadata,
-                 book: bool | None = False) -> None:
+                 book: bool | None = False, grobid: Grobid | None = None) -> None:
         """``book``: True writes a whole book (front matter, chapters, back matter), False one
         chapter or article, None decides from the document (a printed contents page or a
         copyright page with an ISBN)."""
@@ -321,12 +332,40 @@ class _Builder:
         self.rev_folio: dict[str, int] = {}       # printed page number → PDF page
         self.refs_total = 0
         self.refs_tagged = 0
+        self.grobid = grobid
+        self.refs_grobid = 0                      # references tagged from GROBID's reading
 
     # -- step 1: flat flow with floats, queries and marks resolved
     def _flow(self) -> None:
         self.query_styles = self._query_styles(re.compile(self.p.queries.pattern))
         self.margin_heads = self._margin_heads()
-        self.flow = [*self._flow_blocks(self.doc.body)]
+        self.flow = self._label_headings([*self._flow_blocks(self.doc.body)])
+
+    def _label_headings(self, flow: Sequence[Item]) -> list[Item]:
+        """A label line ("Chapter 2", "PART III", "CHAPTER TWO") set right above a heading on
+        its page is a heading, whatever the layout engine called it: it may read "Chapter 1"
+        as a heading and the identical "Chapter 2" as a paragraph. Chapter starts, section
+        labels and endnote groups ("Chapter 2" notes) all need it as the label. A bare number
+        counts only when it is set in a heading style (else it may be a stray page number)."""
+        out = list(flow)
+        for k in range(len(out) - 1):
+            b, nxt = out[k], out[k + 1]
+            if not (isinstance(b, Paragraph) and isinstance(nxt, Heading)
+                    and nxt.page == b.page and b.bbox[3] <= nxt.bbox[1] + 2):
+                continue
+            text = runs_text(b.runs)
+            if not label_only(text):
+                continue
+            style = self.doc.styles.get(b.style or "")
+            heading_style = style is not None and style.role == "heading"
+            if re.fullmatch(r"\d{1,3}", despace(text).strip()) and not heading_style:
+                continue
+            level = style.level if heading_style and style is not None and style.level else (
+                nxt.level)
+            out[k] = Heading(id=b.id, page=b.page, bbox=b.bbox, style=b.style, level=level,
+                             runs=list(b.runs), para=b.para)
+            self.stats["labels_promoted"] = self.stats.get("labels_promoted", 0) + 1
+        return out
 
     def _in_margin(self, b: Heading | Paragraph) -> bool:
         """In the top or bottom sixth of the page, where running heads and feet are set."""
@@ -381,8 +420,14 @@ class _Builder:
         used = {id(c) for c in captions.values()}
         pending_float: FloatObj | None = None
         for k, b in enumerate(body):
+            if isinstance(b, Heading | Paragraph) and _plain(runs_text(b.runs)) in {
+                    _plain(mark) for mark in p.production_marks}:
+                self._drop("production watermark", b)
+                self.stats["production_marks_dropped"] = self.stats.get("production_marks_dropped", 0) + 1
+                continue
             if id(b) in self.margin_heads:
                 self.stats["running_heads_dropped"] += 1
+                self._drop("running head", b)
                 continue
             if isinstance(b, Box):
                 out.append(self._box(b))
@@ -398,6 +443,7 @@ class _Builder:
             text = runs_text(getattr(b, "runs", []) or [])
             if isinstance(b, Paragraph | Caption) and _CONTINUED.match(text):
                 self.stats["continued_dropped"] = self.stats.get("continued_dropped", 0) + 1
+                self._drop("continued line", b)
                 continue
             if (isinstance(b, Paragraph | Caption) and b.style in self.query_styles
                     and not qre.match(text)):
@@ -413,6 +459,7 @@ class _Builder:
                     and len(_head_key(text)) >= 8 and _head_key(text) in head_keys
                     and re.search(r"[\d■●◆▪|]", text) and self._in_margin(b)):
                 self.stats["running_heads_dropped"] += 1
+                self._drop("running head", b)
                 continue
             if isinstance(b, Paragraph | Caption) and qre.match(text):
                 out.append(Query(text.strip(), b.page))
@@ -442,6 +489,7 @@ class _Builder:
                 w, h = b.bbox[2] - b.bbox[0], b.bbox[3] - b.bbox[1]
                 if w < p.min_figure_pt and h < p.min_figure_pt and b.id not in captions:
                     self.stats["marks_dropped"] += 1
+                    self._drop("small figure (mark)", b)
                     continue
             if isinstance(b, Table | Figure):
                 f = FloatObj("table" if isinstance(b, Table) else "fig", b)
@@ -456,6 +504,11 @@ class _Builder:
                 out.append(b)
         return out
 
+    def _drop(self, reason: str, b: object) -> None:
+        """Record a block left out on purpose (see ``SemanticDoc.dropped``)."""
+        text = runs_text(getattr(b, "runs", None) or [])
+        self.sem.dropped.append((reason, _page(b), text.strip()))
+
     def _box(self, b: Box) -> BoxNode:
         """A drawn box: its first heading is the box title ("Box 2.1 Checklist" → label +
         title), later headings open sections inside the box."""
@@ -466,6 +519,14 @@ class _Builder:
             nodes.pop(0)
             label, _, runs = self._split_heading(h)
             box.label, box.title, box.title_style, box.heading = label, runs, h.style, h
+            title = runs_text(h.runs).strip().lower()
+            for prefix, kind in (("learning outcomes", "learning-outcomes"),
+                                 ("learning objectives", "learning-objectives"),
+                                 ("stop and consider", "stop-and-consider"),
+                                 ("notable research", "notable-research")):
+                if title.startswith(prefix):
+                    box.kind = kind
+                    break
         cur: Section | None = None
         for n in nodes:
             if isinstance(n, Heading):
@@ -536,6 +597,9 @@ class _Builder:
                 drop.update(querylike)
         if not drop:
             return t
+        for r, i in sorted(drop):
+            self.sem.dropped.append(("author query (table column)", t.page,
+                                     runs_text(t.rows[r][i].runs).strip()))
         rows = [[cell for i, cell in enumerate(row) if (r, i) not in drop]
                 for r, row in enumerate(t.rows)]
         self.stats["queries"] += 1
@@ -751,7 +815,13 @@ class _Builder:
         mp = self.meta.part
         heads = [b for b in self.flow if isinstance(b, Heading)]
         top = min((h.level for h in heads), default=None)
-        first = next((h for h in heads if h.level == top), None)
+        first = next((h for h in heads if h.role == "chapter"), None)
+        first = first or next((h for h in heads if h.level == top), None)
+        # A selected page range may start inside a known book. Retain its first
+        # section heading rather than consuming "Practice Questions" as a title.
+        if (first is not None and first.role != "chapter" and self.doc.meta.outline
+                and any(e.kind == "chapter" for e in self.doc.meta.outline)):
+            first = None
         at: int | None = None
         if first is not None and (not mp.title
                                   or _plain(runs_text(first.runs)) == _plain(mp.title)):
@@ -765,6 +835,18 @@ class _Builder:
             self.sem.title = [Run(text=self.doc.meta.title)]
         self.sem.subtitle = mp.subtitle
         self.sem.label = mp.label
+        if first is not None and first.role == "chapter":
+            anchor = next((e for e in self.doc.meta.outline or []
+                           if e.kind == "chapter" and e.page == first.page), None)
+            if anchor is not None:
+                self.sem.label = mp.label or anchor.label
+            labels = [b for b in self.flow if isinstance(b, Heading) and b.page == first.page
+                      and label_only(runs_text(b.runs))
+                      and re.search(r"\bchapter\b", runs_text(b.runs), re.I)]
+            if labels and not mp.label:
+                self.sem.label = runs_text(labels[0].runs)
+            remove = {id(b) for b in labels}
+            self.flow = [b for b in self.flow if id(b) not in remove]
         if at is not None and self.p.front_matter:
             self._authors(at)
 
@@ -798,6 +880,9 @@ class _Builder:
         smap = self.p.sections.map if self.p.sections.mode == "style-map" else {}
         for h in heads:
             self.rank[id(h)] = max(1, smap.get(h.style or "", dense[key(h)]))
+        if any(h.role == "module" for h in heads):
+            for h in heads:
+                self.rank[id(h)] = max(1, h.level - 1)
 
     # -- step 5: abstract, keywords, reference list, back matter
     def _kind(self, h: Heading) -> str | None:
@@ -838,18 +923,23 @@ class _Builder:
                         self.maybe_empty.add(id(out[-1]))
                     title = self._split_heading(b)[2]
                     if mkind:
-                        u.back.append(self._matter(mkind, b, body))
+                        m = self._matter(mkind, b, body)
+                        if mkind in ("refs", "further"):
+                            out.extend(m.nodes)        # not references: back into the text
+                            m.nodes = []
+                        u.back.append(m)
                     elif is_refs:
                         u.ref_title = title
-                        self._references(body, u.references)
+                        out.extend(self._references(body, u.references))
                     elif kind == "abstract":
                         u.abstract.extend(x for x in body if isinstance(x, Paragraph))
                         u.abstract_title = title
+                        out.extend(x for x in body if not isinstance(x, Paragraph | Heading))
                     else:
                         self._keywords("author" if kind == "keywords" else "MeSH", title, body,
                                        u.keywords)
-                    if not mkind:
-                        out.extend(x for x in body if isinstance(x, Query) and not is_refs)
+                        out.extend(x for x in body
+                                   if not isinstance(x, Paragraph | ListBlock | Heading))
                     if (not is_refs and not mkind and end < len(flow)
                             and isinstance(flow[end], Heading)):
                         self.maybe_empty.add(id(flow[end]))
@@ -897,7 +987,10 @@ class _Builder:
             return runs_text(nxt.items[0].runs) if nxt.items else ""
         return runs_text(nxt.runs) if nxt is not None else ""
 
-    def _references(self, body: Sequence[Item], refs: list[Reference]) -> None:
+    def _references(self, body: Sequence[Item], refs: list[Reference]) -> list[Node]:
+        """Read the reference entries of a reference-list region. Returns what is not a
+        reference (a figure, a box, code …, e.g. the opening art of the next chapter printed
+        after the list): the caller keeps it, it must never be lost."""
 
         def add_items(items: Sequence[ListItem]) -> None:
             for it in items:
@@ -906,6 +999,7 @@ class _Builder:
                     if isinstance(ch, ListBlock):
                         add_items(ch.items)
 
+        rest: list[Node] = []
         for b in body:
             if isinstance(b, ListBlock):
                 add_items(b.items)
@@ -914,19 +1008,44 @@ class _Builder:
             elif isinstance(b, Query):
                 if refs:
                     refs[-1].queries.append(b)
+                else:
+                    rest.append(b)
             elif isinstance(b, Heading):
-                continue
+                # a sub-heading of the list ("Primary sources"): ref-list has no place for it
+                self._drop("heading inside a reference list", b)
+            elif not isinstance(b, Matter):
+                rest.append(b)
+        return rest
 
     def _finish_refs(self, refs: list[Reference]) -> list[Reference]:
         # Entries split across columns/pages continue in lower case, with a URL tail, or a digit.
+        separated: list[Reference] = []
+        for reference in refs:
+            text = reference.text
+            starts = [0]
+            for candidate in re.finditer(r"(?<!\w)[A-ZÀ-ɏ][\w’'‐‑-]+,\s*(?:[A-Z]\.\s*){1,5}\((?:19|20)\d{2}[a-z]?\)", text):
+                if candidate.start() > 0 and re.search(r"https?://|www\.|\bdoi:", text[:candidate.start()], re.I):
+                    starts.append(candidate.start())
+            if len(starts) == 1:
+                separated.append(reference)
+            else:
+                for index, start in enumerate(starts):
+                    stop = starts[index + 1] if index + 1 < len(starts) else len(text)
+                    separated.append(Reference(_slice(reference.runs, start, stop),
+                        label=reference.label if index == 0 else None, page=reference.page,
+                        queries=list(reference.queries) if index == len(starts) - 1 else []))
         merged: list[Reference] = []
-        for r in refs:
+        for r in separated:
             t = r.text.strip()
             if not t:
                 continue
             first = t[:1]
+            journal_tail = (merged and t.startswith(("Journal of ", "The Journal of "))
+                            and not re.search(r"\((?:19|20)\d{2}", t)
+                            and re.search(r"https?://|doi:", t, re.I)
+                            and not re.search(r"https?://|doi:", merged[-1].text, re.I))
             if merged and (first.islower() or first.isdigit() and not re.match(r"^\d+[.)\]]", t)
-                           or t.lower().startswith(("http", "www.", "doi"))):
+                           or t.lower().startswith(("http", "www.", "doi")) or journal_tail):
                 prev = merged[-1]
                 sep = "" if prev.text.rstrip().endswith(("/", "-")) else " "
                 prev.runs = [*prev.runs[:-1], prev.runs[-1].model_copy(
@@ -947,8 +1066,9 @@ class _Builder:
                 r.label = None
             r.pub_type = _pub_type(r.text)
             r.keys = _ref_keys(r.text)
-            if self.p.granular_references:
-                r.parsed = parse_reference(r.text, self._italics(r.runs))
+        if self.p.granular_references:
+            self._parse_refs(merged)
+        for r in merged:
             if r.parsed is not None:
                 r.keys |= _parsed_keys(r.parsed)
                 kind = "book" if r.parsed.kind == "chapter" else r.parsed.kind
@@ -957,6 +1077,28 @@ class _Builder:
         self.refs_total += len(merged)
         self.refs_tagged += sum(r.parsed is not None for r in merged)
         return merged
+
+    def _parse_refs(self, refs: Sequence[Reference]) -> None:
+        """Tag each reference's parts. With a GROBID server, ``grobid_references`` "fallback"
+        asks it for the references the built-in reader cannot read, "prefer" for all of them
+        (the built-in reading stays where GROBID's fields cannot be placed on the text, and
+        adds the elements GROBID left out)."""
+        for r in refs:
+            r.parsed = parse_reference(r.text, self._italics(r.runs))
+        mode = self.p.grobid_references
+        if self.grobid is None or mode == "off":
+            return
+        ask = [r for r in refs if mode == "prefer" or r.parsed is None]
+        if not ask:
+            return
+        # optional, and left out of the deploy package
+        from pdf2xml.publishing.grobid import align, fill
+
+        for r, bibl in zip(ask, self.grobid.citations([r.text for r in ask]), strict=True):
+            got = align(r.text, bibl) if bibl is not None else None
+            if got is not None:
+                r.parsed = fill(got, r.parsed)
+                self.refs_grobid += 1
 
     def _italics(self, runs: Sequence[Run]) -> list[tuple[int, int]]:
         """Character ranges set in italics (body style as the base)."""
@@ -1009,6 +1151,10 @@ class _Builder:
                     (stack[-1].nodes if stack else preamble).append(b)
                 continue
             nxt = flow[k + 1] if k + 1 < len(flow) else None
+            if (runs_text(b.runs).strip().lower() == "apply" and isinstance(nxt, Heading)
+                    and runs_text(nxt.runs).strip().lower() == "case studies"):
+                pending_label = runs_text(b.runs).strip()
+                continue
             if (label_only(runs_text(b.runs)) and isinstance(nxt, Heading) and nxt.page == b.page
                     and not label_only(runs_text(nxt.runs))):
                 # "S E C T I O N 1" / "CHAPTER FOURTEEN" printed above the title it labels
@@ -1025,8 +1171,9 @@ class _Builder:
                 box = BoxNode(label, runs, b.style, depth, page=b.page, heading=b)
                 (stack[-1].nodes if stack else preamble).append(box)
                 continue
+            sec_type = "module" if b.role == "module" else _SEC_TYPES.get(_plain(text))
             sec = Section(b, depth, label, runs,
-                          sec_type=_SEC_TYPES.get(_plain(text))
+                          sec_type=sec_type
                           if self.p.sections.sec_types else None,
                           drop_if_empty=id(b) in self.maybe_empty)
             target_stack, top = (bstack, box.children) if box is not None else (
@@ -1035,7 +1182,7 @@ class _Builder:
                 target_stack.pop()
             (target_stack[-1].children if target_stack else top).append(sec)
             target_stack.append(sec)
-        return preamble, _prune(sections, self.stats), matters
+        return preamble, _prune(sections, self.stats, self.sem.dropped), matters
 
     # -- step 6: printed table of contents
     def _toc(self) -> None:
@@ -1072,6 +1219,8 @@ class _Builder:
                 continue
             m = Matter("toc", b if isinstance(b, Heading) else None, None, list(b.runs), b.style,
                        toc=parsed.entries, page=b.page)
+            self.sem.toc_pages = sorted({b.page, *(_page(x) for x in self.flow[lo:hi]
+                                                   if _toc_block(x) is not None)})
             start = min(lo, i)
             between = self.flow[i + 1:lo] if lo > i else []
             self.flow = [*self.flow[:start], m, *between, *kept, *self.flow[max(hi, i + 1):]]
@@ -1167,6 +1316,10 @@ class _Builder:
             return self.book
         if not self.p.matter:
             return False
+        present = {p.n for p in self.doc.pages}
+        if sum(e.kind == "chapter" and e.page in present
+               for e in self.doc.meta.outline or []) >= 2:
+            return True
         toc = next((b for b in self.flow if isinstance(b, Matter) and b.kind == "toc"), None)
         if toc is not None and sum(1 for e in walk_toc(toc.toc) if e.folio) >= 3:
             return True
@@ -1208,7 +1361,9 @@ class _Builder:
         self._ranks()
         flow = self.flow
         toc = next((b for b in flow if isinstance(b, Matter) and b.kind == "toc"), None)
-        starts = self._toc_starts(toc) if toc is not None else []
+        starts = self._bookmark_starts()
+        if len(starts) < 2:
+            starts = self._toc_starts(toc) if toc is not None else []
         if len(starts) < 2:
             if toc is not None:
                 for e in walk_toc(toc.toc):
@@ -1216,10 +1371,13 @@ class _Builder:
             starts = self._rank_starts()
         sem = self.sem
         matter_kinds = FRONT_KINDS | ANY_KINDS | BACK_KINDS | {"refs", "toc"}
+        for st in [*starts, *(c for s in starts for c in s.children)]:
+            if st.kind not in matter_kinds:
+                st.lead = self._lead(st)
         body_i = next((n for n, s in enumerate(starts) if s.kind not in matter_kinds), None)
         if body_i is None:
             body_i = next((n for n, s in enumerate(starts) if s.kind not in FRONT_KINDS), None)
-        front_end = starts[body_i].idx if body_i is not None else len(flow)
+        front_end = starts[body_i].begin if body_i is not None else len(flow)
         sem.front = self._front(flow[:front_end])
         if body_i is None:
             return
@@ -1227,7 +1385,7 @@ class _Builder:
         back_kinds = ANY_KINDS | BACK_KINDS | {"refs"}
         back_i = next((n for n, s in enumerate(rest) if n and s.kind in back_kinds), len(rest))
         for n, s in enumerate(rest):
-            end = rest[n + 1].idx if n + 1 < len(rest) else len(flow)
+            end = rest[n + 1].begin if n + 1 < len(rest) else len(flow)
             if n < back_i:
                 sem.units.append(self._make_unit(s, end))
             elif s.kind in back_kinds:
@@ -1235,7 +1393,7 @@ class _Builder:
                                  flow[s.idx + s.n:end], s)
                 if s.entry is not None:
                     s.entry.target_obj = m
-                sem.back.append(m)
+                sem.back.extend(self._with_leftovers(m))
             else:
                 sem.back.append(self._make_unit(s, end))
         units = self._all_units()
@@ -1286,27 +1444,65 @@ class _Builder:
             s.entry.target_obj = u
             for c in s.entry.contributors:
                 u.contributors.extend(_names(c))
-        first = s.children[0].idx if s.children else end
+        first = s.children[0].begin if s.children else end
         items = list(flow[s.idx + s.n:first])
         if items and isinstance(items[0], Paragraph) and not u.contributors:
             byline = _names(runs_text(items[0].runs))
             if byline:
                 u.contributors = byline                 # "Paul Rand" under the title
                 items = items[1:]
-        self._unit_body(u, items)
+        self._unit_body(u, [*flow[s.begin:s.idx], *items])
         for n, child in enumerate(s.children):
-            cend = s.children[n + 1].idx if n + 1 < len(s.children) else end
+            cend = s.children[n + 1].begin if n + 1 < len(s.children) else end
             u.children.append(self._make_unit(child, cend))
         u.last_page = max([u.page] + [_page(x) for x in flow[s.idx:end]])
         if end < len(flow):             # up to the page before the next chapter (blank pages too)
             u.last_page = max(u.last_page, _page(flow[end]) - 1)
         return u
 
+    def _lead(self, s: _Start) -> int:
+        """Floats printed on the chapter's first page above its heading: its opening art."""
+        k = s.idx
+        while (k > 0 and isinstance(self.flow[k - 1], FloatObj)
+               and _page(self.flow[k - 1]) == s.page):
+            k -= 1
+        return s.idx - k
+
     def _unit_body(self, u: Unit, items: Sequence[Item]) -> None:
         rest = self._regions(items, u)
         u.preamble, u.sections, u.front = self._tree(rest)
 
     # -- chapter starts
+    def _bookmark_starts(self) -> list[_Start]:
+        """Explicit PDF chapter anchors outrank a visually misnested printed contents.
+
+        Production filenames supply only chapter numbers/page boundaries. Titles always
+        come from recovered source headings, never from filename text.
+        """
+        out = []
+        for entry in self.doc.meta.outline or []:
+            if entry.kind not in ("chapter", "glossary", "index"):
+                continue
+            candidates = [(i, b) for i, b in enumerate(self.flow)
+                          if isinstance(b, Heading) and (entry.page <= b.page <= entry.page + 3
+                                                        if entry.kind == "chapter" else b.page == entry.page)
+                          and (b.role == "chapter" if entry.kind == "chapter"
+                               else kind_of(runs_text(b.runs)) == entry.kind)]
+            if not candidates:
+                continue
+            index, head = candidates[0]
+            begin = index
+            previous = self.flow[index - 1] if index else None
+            label = entry.label
+            if isinstance(previous, Heading) and (
+                    previous.page == head.page and label_only(runs_text(previous.runs))):
+                begin -= 1
+                label = runs_text(previous.runs)
+            out.append(_Start(begin, index - begin + 1, head, list(head.runs), head.style,
+                              label, None if entry.kind == "chapter" else entry.kind,
+                              head.page))
+        return out
+
     def _toc_starts(self, toc: Matter) -> list[_Start]:
         """The heading each top-level contents entry points to, in order. A "Part" entry holds
         the chapters listed under it."""
@@ -1460,7 +1656,7 @@ class _Builder:
                 if kind in (None, "toc"):          # a contents heading whose entries were unread
                     out.extend(self._front_pages(items[k:end]))
                 else:
-                    out.append(self._matter(kind, b, items[k + 1:end]))
+                    out.extend(self._with_leftovers(self._matter(kind, b, items[k + 1:end])))
         return out
 
     def _find_title_page(self, items: Sequence[Item]) -> int | None:
@@ -1616,11 +1812,11 @@ class _Builder:
             else:
                 m.nodes, m.sections, _ = self._tree(blocks)
         elif kind == "index":
-            m.index = mt.index_entries([blk for x in blocks if (blk := _entry_block(x)) is not None
-                                        and not isinstance(blk, Table)])
+            # tables too: the layout engine often reads an index page as one
+            m.index = mt.index_entries([blk for x in blocks if (blk := _toc_block(x)) is not None])
             m.nodes, m.sections, _ = self._tree(blocks)
         elif kind in ("further", "refs"):
-            self._references(blocks, m.references)
+            m.nodes = self._references(blocks, m.references)   # what is not a reference
             m.references = self._finish_refs(m.references)
         elif kind == "app" and _plain(text) == "appendices":
             m.nodes, secs, _ = self._tree(blocks)
@@ -1628,10 +1824,34 @@ class _Builder:
                                  nodes=s.nodes, sections=s.children, page=s.heading.page)
                           for s in secs]
         else:
-            m.nodes, m.sections, _ = self._tree(blocks)
+            remaining = []
+            i = 0
+            while i < len(blocks):
+                block = blocks[i]
+                if self.p.references and isinstance(block, Heading) and _plain(runs_text(block.runs)) in self._refs_heads:
+                    end = self._region_end(blocks, i, refs=True)
+                    m.ref_title = list(block.runs)
+                    remaining.extend(self._references(blocks[i + 1:end], m.references))
+                    i = end
+                else:
+                    remaining.append(block)
+                    i += 1
+            if m.references:
+                m.references = self._finish_refs(m.references)
+            m.nodes, m.sections, _ = self._tree(remaining)
         key_ = "front_matter" if kind in FRONT_KINDS else "back_matter"
         self.stats[key_] = self.stats.get(key_, 0) + 1
         return m
+
+    @staticmethod
+    def _with_leftovers(m: Matter) -> list[Matter]:
+        """A reference list part, and after it what its region held besides references (a
+        ref-list has no room for a figure): never lost."""
+        if m.kind not in ("refs", "further") or not m.nodes:
+            return [m]
+        rest = Matter("other", nodes=m.nodes, page=_page(m.nodes[0]))
+        m.nodes = []
+        return [m, rest]
 
     def _notes(self, m: Matter, blocks: Sequence[Item]) -> None:
         """Endnotes: numbered list items or paragraphs, in groups under sub-headings
@@ -1805,17 +2025,38 @@ class _Builder:
             sem.note_ids = build(sem.footnotes, sem.back)
             return
         book_notes = [m for m in sem.back if isinstance(m, Matter) and m.kind == "notes"]
+        numbers = self._chapter_numbers()
         for u in self._all_units():
             u.note_ids = build(u.footnotes, u.back)
-            names = {mt.key(x) for x in (u.label or "", runs_text(u.title),
-                                         f"{u.label or ''} {runs_text(u.title)}",
-                                         f"chapter {u.label or ''}") if mt.key(x)}
+            n = numbers.get(id(u))
+            name = runs_text(u.title)
+            names = {mt.key(x) for x in (u.label or "", name, f"{u.label or ''} {name}",
+                                         f"chapter {u.label or ''}",
+                                         *((f"chapter {n}", str(n), f"{n} {name}")
+                                           if n is not None else ())) if mt.key(x)}
             for m in book_notes:
                 for title, fns in m.notes:
                     if title and mt.key(runs_text(title)) in names:
                         for f in fns:
                             if f.label:
                                 u.note_ids.setdefault(f.label, f.id)
+
+    def _chapter_numbers(self) -> dict[int, int]:
+        """id(chapter unit) → its number: the one in its label ("Chapter 7", "7", "SEVEN"),
+        else the one after the previous chapter's. Endnotes printed together at the back are
+        grouped by it ("Chapter 7"), and a label can be missing or unreadable."""
+        out: dict[int, int] = {}
+        prev: int | None = None
+        for u in self._all_units():
+            if u.kind != "chapter":
+                continue
+            n = mt.label_number(u.label)
+            if n is None and prev is not None:
+                n = prev + 1
+            if n is not None:
+                out[id(u)] = n
+                prev = n
+        return out
 
     # -- step 9: printed page numbers and where each page begins
     def _folios(self) -> None:
@@ -2089,12 +2330,13 @@ class _Builder:
             targeted = {e.target for e in entries if e.target}
             units = [u for u in self._all_units() if u.heading is not None and u.title]
             top = min((self.rank.get(id(u.heading), 1) for u in units if u.heading), default=0)
+            anchored = any(u.heading and u.heading.role == "chapter" for u in units)
             unlisted: list[str] = []
             for u in units:
                 if u.id not in targeted:
                     unlisted.append(" ".join(runs_text(u.title).split()))
                 unlisted.extend(" ".join(runs_text(s.title).split()) for s in u.sections
-                                if self.rank.get(id(s.heading), 99) <= top
+                                if not anchored and self.rank.get(id(s.heading), 99) <= top
                                 and s.id not in targeted)
             if unlisted:
                 more = f" (+{len(unlisted) - 8} more)" if len(unlisted) > 8 else ""
@@ -2126,6 +2368,8 @@ class _Builder:
         self.sem.stats = s
         if self.refs_total and self.p.granular_references:
             s["references_tagged"] = self.refs_tagged
+            if self.grobid is not None:
+                s["references_tagged_grobid"] = self.refs_grobid
             if self.refs_tagged < self.refs_total:
                 self.sem.warnings.append(
                     f"{self.refs_total - self.refs_tagged} of {self.refs_total} reference(s) "
@@ -2156,6 +2400,13 @@ class _Start:
     page: int
     entry: TocEntry | None = None
     children: list[_Start] = field(default_factory=list)
+    # floats right before the heading on its page (chapter-opening art): the chapter's own
+    lead: int = 0
+
+    @property
+    def begin(self) -> int:
+        """Where the chapter's flow begins, its opening art included."""
+        return self.idx - self.lead
 
 
 def _reference_like(text: str) -> bool:
@@ -2212,10 +2463,10 @@ def _entry_like(x: object) -> bool:
     blk = _toc_block(x)
     if blk is None:
         return False
-    if isinstance(blk, Table):
-        return any(mt.folio(runs_text(c.runs)) for row in blk.rows for c in row[1:])
     if isinstance(blk, Heading | Paragraph | Caption) and mt.folio(runs_text(blk.runs)):
         return True
+    # tables too go through the line reader, which strips dot leaders the engine left in the
+    # page-number cells (". . . . 19")
     return mt.toc_lines_with_folio([blk])[0] > 0
 
 
@@ -2305,17 +2556,20 @@ def _replace_last(lb: ListBlock, new: ListItem) -> ListBlock:
     return lb.model_copy(update={"items": [*lb.items[:-1], new]})
 
 
-def _prune(secs: list[Section], stats: dict[str, int]) -> list[Section]:
+def _prune(secs: list[Section], stats: dict[str, int],
+           dropped: list[tuple[str, int, str]]) -> list[Section]:
     """Drop a heading next to extracted front matter that is left with nothing under it, e.g. a
     "Digital-only content" heading printed with the Abstract/Keywords. Other empty headings keep
     their text. Queries they held move to the previous section."""
     out: list[Section] = []
     for s in secs:
-        s.children = _prune(s.children, stats)
+        s.children = _prune(s.children, stats, dropped)
         if s.drop_if_empty and not s.children and all(isinstance(n, Query) for n in s.nodes):
             if out:
                 _last(out[-1]).nodes.extend(s.nodes)
             stats["empty_sections_dropped"] = stats.get("empty_sections_dropped", 0) + 1
+            dropped.append(("empty heading next to front matter", s.heading.page,
+                            runs_text(s.heading.runs).strip()))
             continue
         out.append(s)
     return out
@@ -2400,8 +2654,9 @@ def _pub_type(text: str) -> str:
     return "other"
 
 
-def build(doc: Document, profile: Profile, meta: Metadata, *, book: bool | None = False
-          ) -> SemanticDoc:
+def build(doc: Document, profile: Profile, meta: Metadata, *, book: bool | None = False,
+          grobid: Grobid | None = None) -> SemanticDoc:
     """``book``: True for a whole book, False for one chapter or article, None to decide from
-    the document (a printed contents page, or a copyright page with an ISBN)."""
-    return _Builder(doc, profile, meta, book).build()
+    the document (a printed contents page, or a copyright page with an ISBN). ``grobid``: a
+    GROBID server that reads the references the built-in reader cannot."""
+    return _Builder(doc, profile, meta, book, grobid).build()

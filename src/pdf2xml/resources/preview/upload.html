@@ -57,11 +57,11 @@
   iframe { width: 100%; height: 70vh; border: 1px solid var(--rule); border-radius: 6px;
            background: #fff; }
 </style>
-</head>
+<script src="/inspector/quality-report.js" defer></script></head>
 <body>
 <header>
   <h1>pdf2xml — convert a PDF</h1>
-  <span class="muted">Upload → Docling → S4C, BITS and JATS XML</span>
+  <span class="muted">Upload → Docling → Canonical, Content, BITS and JATS XML</span>
   <a href="/">open the proof viewer</a>
 </header>
 <main>
@@ -76,8 +76,18 @@
         <option value="docling">Docling (accurate; first run loads models ~40 s)</option>
         <option value="heuristic">Heuristic (fast, no table detection)</option>
       </select>
+      <label for="table-mode">Table extraction</label>
+      <select id="table-mode">
+        <option value="accurate">Accurate (default)</option>
+        <option value="fast">Fast (review complex tables)</option>
+      </select>
       <label for="pages">Pages (optional)</label>
       <input id="pages" type="text" placeholder="all, or e.g. 1-20">
+      <label><input id="content-xml" type="checkbox" checked> Include Content XML</label>
+      <label><input id="publishing-xml" type="checkbox"> Include BITS and JATS XML</label>
+      <label><input id="book-exports" type="checkbox"> Include EPUB and Word</label>
+      <label><input id="qa-overlays" type="checkbox"> Generate QA page images</label>
+      <div class="muted">Titles, paragraphs and tables, keeping bold, italic and other styles.</div>
       <button id="go" disabled>Convert</button>
     </div>
     <div class="card" style="margin-top:16px">
@@ -93,14 +103,15 @@
     <h2>3. Outputs</h2>
     <div id="outputs" class="muted">The XML outputs appear here when the conversion is done.</div>
   </section>
-</main>
+<section class="card" style="grid-column:1 / -1;margin:20px 0"><h2>Quality Report</h2><div id="quality-report">Process a PDF to see the complete report.</div></section></main>
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
 const STAGE_NAMES = {
   style_layer: "Reading text and styles", structure_layer: "Layout analysis (engine)",
   merge_build: "Building the document", figures: "Cutting figures", xml: "Canonical XML",
-  epub: "EPUB", docx: "Word", bits_jats: "BITS and JATS XML", overlays: "Page images",
+  content: "Content XML", epub: "EPUB", docx: "Word", bits_jats: "BITS and JATS XML",
+  overlays: "Page images",
 };
 let file = null, current = null, timer = null;
 
@@ -139,6 +150,11 @@ $("drop").addEventListener("drop", (e) => pick(e.dataTransfer.files[0]));
 $("go").onclick = async () => {
   $("go").disabled = true;
   const q = new URLSearchParams({ engine: $("engine").value });
+  q.set("table_mode", $("table-mode").value);
+  q.set("to", "json,xml" + ($("content-xml").checked ? ",content" : "")
+      + ($("publishing-xml").checked ? ",bits,jats" : "")
+      + ($("book-exports").checked ? ",epub,docx" : ""));
+  q.set("overlays", $("qa-overlays").checked ? "true" : "false");
   if ($("pages").value.trim()) q.set("pages", $("pages").value.trim());
   try {
     const job = await api("POST", "/api/convert?" + q, file,
@@ -179,6 +195,7 @@ function showProgress(job) {
     kids.push(el("div", {}, `Step ${job.stage_index} of ${job.stage_count}: `
       + (STAGE_NAMES[job.stage] || "starting") + ` — ${job.elapsed_s} s`));
   if (job.state === "queued") kids.push(el("div", { class: "muted" }, "Waiting for the previous conversion."));
+  if (job.state === "failed") { showQuality(job); }
   if (job.state === "failed") kids.push(el("div", { class: "error" }, job.error));
   if (job.state === "done") kids.push(el("div", {}, `Finished in ${job.elapsed_s} s — result `,
       el("span", { class: "badge s-" + job.result.status }, job.result.status),
@@ -192,8 +209,20 @@ function showProgress(job) {
 
 // ---- 3. outputs: a tab per XML, previewed through the server's stylesheet
 // "S4C XML" is the project's name for the canonical XML (30_canonical.xml)
-const TABS = [["canonical_xml", "S4C XML"], ["bits", "BITS XML"], ["jats", "JATS XML"]];
+const TABS = [["canonical_xml", "S4C XML"], ["content_xml", "Content XML"],
+              ["bits", "BITS XML"], ["jats", "JATS XML"]];
+async function showQuality(job) {
+  const box=$("quality-report");
+  box.textContent="Loading quality and validation reports?";
+  try {
+    const report=await api("GET", "/api/report?"+new URLSearchParams({doc:job.doc}));
+    box.innerHTML=window.renderQualityReport(report);
+    const link=el("a",{href:`/files/${encodeURIComponent(job.doc)}/quality_report.html`,target:"_blank"},"Open printable quality report");
+    box.prepend(link);
+  } catch(error) {box.textContent=`Report unavailable: ${error.message}. ${job.error || ""}`;}
+}
 function showOutputs(job) {
+  showQuality(job);
   const out = job.result.outputs;
   const frame = el("iframe", { title: "Preview" });
   const tabs = el("div", { class: "tabs" });
@@ -210,6 +239,9 @@ function showOutputs(job) {
   for (const [key, o] of Object.entries(out))
     downloads.append(el("a", { href: o.download, download: o.file }, o.file));
   downloads.append(el("a", { href: job.result.report, target: "_blank" }, "report.json"));
+  const layoutOutput = out.canonical_xml || out.content_xml || out.bits || out.jats;
+  if (layoutOutput) downloads.append(el("a", { href: "/inspect#" + new URLSearchParams({doc: job.doc,
+    file: layoutOutput.file}) }, "Layout QA · PDF / XML"));
   $("outputs").replaceChildren(tabs, downloads, frame);
   if (tabs.firstChild) tabs.firstChild.click();
 }

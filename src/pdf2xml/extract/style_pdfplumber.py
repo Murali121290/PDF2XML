@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pdfplumber
+from pdfplumber.utils.text import dedupe_chars
 
 from pdf2xml.extract.types import Drawing, ImageRef, PageLayer, StyleLayer, Word, r2, rbox
 from pdf2xml.styles.fonts import parse_font, strip_subset, to_hex
@@ -15,6 +16,30 @@ from pdf2xml.styles.fonts import parse_font, strip_subset, to_hex
 # than glue two words together when a PDF has no explicit space characters.
 _X_TOL = 1.5
 _Y_TOL = 2.0
+
+
+class _IndexedChars(list[dict[str, Any]]):
+    """Speed up the library's source-order restoration without changing deduplication."""
+
+    def __init__(self, chars: list[dict[str, Any]]) -> None:
+        super().__init__(chars)
+        self._positions = {id(char): n for n, char in enumerate(chars)}
+
+    def index(self, value: Any, start: Any = 0, stop: Any = None) -> int:
+        position = self._positions.get(id(value))
+        if position is not None and start <= position < (len(self) if stop is None else stop):
+            return position
+        return super().index(value, start, len(self) if stop is None else stop)
+
+
+def _without_overprint(page: Any) -> Any:
+    """Use pdfplumber's glyph matching, retaining source order and style/color evidence."""
+    chars = _IndexedChars(page.chars)
+    unique = dedupe_chars(
+        chars, tolerance=0.6,
+        extra_attrs=("fontname", "size", "non_stroking_color", "stroking_color"))
+    keep = {id(char) for char in unique}
+    return page.filter(lambda obj: obj.get('object_type') != 'char' or id(obj) in keep)
 
 
 class PdfplumberBackend:
@@ -27,7 +52,13 @@ class PdfplumberBackend:
             for n in numbers:
                 if not 1 <= n <= len(doc.pages):
                     continue
-                out.append(self._page(doc.pages[n - 1], n))
+                page = doc.pages[n - 1]
+                try:
+                    out.append(self._page(page, n))
+                finally:
+                    # Only our dataclasses leave the adapter. A long book must not
+                    # retain every pdfminer character/shape cache until its last page.
+                    page.close()
         return StyleLayer(backend=self.name, pages=out)
 
     def _page(self, page: Any, n: int) -> PageLayer:
@@ -44,7 +75,11 @@ class PdfplumberBackend:
                          or t[3] < layer.height - 2)):
                 layer.trim = t
 
-        words = page.extract_words(
+        # Printing a glyph twice can fuse it into DIISSCCUUSSSSIIOONN during word
+        # extraction. Remove overprint at character level, retaining real repeated
+        # letters at different positions and differently styled/color glyphs.
+        text_page = _without_overprint(page)
+        words = text_page.extract_words(
             x_tolerance=_X_TOL,
             y_tolerance=_Y_TOL,
             keep_blank_chars=False,
@@ -94,7 +129,7 @@ class PdfplumberBackend:
             pts = curve.get("pts") or []
             closed = len(pts) > 2 and abs(pts[0][0] - pts[-1][0]) < 1 and abs(
                 pts[0][1] - pts[-1][1]) < 1
-            if not (curve.get("fill") or closed):
+            if not (curve.get("fill") or closed or curve.get("stroke")):
                 continue
             layer.drawings.append(
                 Drawing(

@@ -67,6 +67,14 @@
           </zeroOrMore>
         </element>
       </optional>
+      <optional>
+        <element name="outline"><zeroOrMore><element name="entry">
+          <attribute name="page"><data type="positiveInteger"/></attribute>
+          <attribute name="kind"/>
+          <attribute name="depth"><data type="nonNegativeInteger"/></attribute>
+          <optional><attribute name="label"/></optional><text/>
+        </element></zeroOrMore></element>
+      </optional>
     </element>
   </define>
 
@@ -104,6 +112,8 @@
     <attribute name="page"><data type="positiveInteger"/></attribute>
     <attribute name="bbox"><ref name="bbox"/></attribute>
     <optional><attribute name="style"/></optional>
+    <optional><attribute name="source-ref"/></optional>
+    <optional><attribute name="region-id"/></optional>
   </define>
 
   <define name="para">
@@ -122,6 +132,7 @@
   <define name="h">
     <element name="h">
       <ref name="common"/>
+      <optional><attribute name="role"/></optional>
       <attribute name="level">
         <data type="positiveInteger"><param name="maxInclusive">6</param></data>
       </attribute>
@@ -151,6 +162,7 @@
     <element name="formula">
       <ref name="common"/>
       <attribute name="display"><ref name="bool"/></attribute>
+      <optional><attribute name="src"><text/></attribute></optional>
       <optional><element name="tex"><text/></element></optional>
       <optional><element name="mathml"><text/></element></optional>
       <optional><element name="text"><ref name="inline"/></element></optional>
@@ -199,6 +211,7 @@
       <optional><attribute name="src"/></optional>
       <optional><attribute name="caption-ref"><data type="IDREF"/></attribute></optional>
       <optional><attribute name="alt"/></optional>
+      <optional><attribute name="decorative"><ref name="bool"/></attribute></optional>
       <empty/>
     </element>
   </define>

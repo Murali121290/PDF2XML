@@ -1,0 +1,31 @@
+groups:
+  - name: pdf2xml
+    rules:
+      - alert: PDF2XMLUnavailable
+        expr: up{job="pdf2xml"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: PDF2XML metrics are unavailable
+      - alert: PDF2XMLListenerStopped
+        expr: pdf2xml_listener_alive == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: PDF2XML job listener has stopped
+      - alert: PDF2XMLQueuePressure
+        expr: (pdf2xml_jobs_queued + pdf2xml_jobs_running) / pdf2xml_queue_capacity > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Tenant job backlog is approaching queue capacity
+      - alert: PDF2XMLRecentFailures
+        expr: (pdf2xml_recent_failures / clamp_min(pdf2xml_recent_completed, 1) > 0.05) and (pdf2xml_recent_completed >= 20)
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: Conversion failure rate exceeds five percent over fifteen minutes

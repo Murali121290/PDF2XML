@@ -56,8 +56,12 @@ def _dtd(key: str) -> etree.DTD:
     return etree.DTD(str(SCHEMAS[key].path))
 
 
-def validate(root: etree._Element, key: str, limit: int = 50) -> list[str]:
+def validate(root: etree._Element, key: str, limit: int | None = None) -> list[str]:
     """Validate against a bundled DTD; returns error messages (empty when valid)."""
+    if key == "content":
+        from pdf2xml.xml.content import validate as content_validate
+
+        return content_validate(root)[:limit]
     dtd = _dtd(key)
     if dtd.validate(root):
         return []
@@ -67,6 +71,8 @@ def validate(root: etree._Element, key: str, limit: int = 50) -> list[str]:
 def detect(root: etree._Element, public_id: str | None = None) -> str:
     """Pick the schema for a document from its root element and DOCTYPE public identifier."""
     tag = etree.QName(root).localname
+    if tag == "content":
+        return "content"
     if tag in ("book", "book-part-wrapper"):
         return "bits"
     pid = (public_id or "").lower()

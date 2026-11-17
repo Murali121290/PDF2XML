@@ -8,7 +8,7 @@ import pypdfium2 as pdfium
 from PIL import ImageDraw
 
 from pdf2xml.export.assets import page_origin
-from pdf2xml.model import Document, ListBlock, iter_blocks
+from pdf2xml.model import Box, Document, Figure, ListBlock, iter_blocks
 
 _COLORS = {
     "heading": (220, 40, 40), "paragraph": (40, 110, 220), "caption": (150, 60, 200),
@@ -43,17 +43,22 @@ def render_overlays(pdf: Path, doc: Document, out_dir: Path, scale: float = 1.5)
             for a in doc.artifacts:
                 if a.page == n:
                     _box(draw, scale, a.bbox, _COLORS["artifact"], a.kind, 1, origin)
+            order = 0
             for part in (doc.body, doc.footnotes, doc.references):
                 for b in iter_blocks(part):
                     if b.page != n:
                         continue
                     color = _COLORS.get(b.type, (0, 0, 0))
-                    is_list = isinstance(b, ListBlock)
-                    label = "" if is_list else f"{b.id} {b.type} {b.style or ''}"
-                    _box(draw, scale, b.bbox, color, label, 1 if is_list else 2, origin)
+                    container = isinstance(b, ListBlock | Box)
+                    readable = not container and not (isinstance(b, Figure) and b.decorative)
+                    if readable:
+                        order += 1
+                    label = (f"{order}: " if readable else '') + f"{b.id} {b.type}"
+                    _box(draw, scale, b.bbox, color, label, 1 if container else 2, origin)
             path = out_dir / f"page-{n:03d}.png"
             img.save(path)
             written.append(path)
+            page.close()
     finally:
         pdf_doc.close()
     return written

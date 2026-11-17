@@ -135,6 +135,17 @@ class RawBlock:
     n_cols: int = 0
     cells: list[RawCell] = field(default_factory=list)
     latex: str | None = None
+    source_ref: str | None = None
+    region_id: str | None = None
+    role: str | None = None
+
+
+@dataclass
+class RawRegion:
+    id: str
+    page: int
+    bbox: BBox
+    role: str = "sidebar"
 
 
 @dataclass
@@ -142,6 +153,7 @@ class StructureLayer:
     engine: str
     blocks: list[RawBlock]
     page_sizes: dict[int, tuple[float, float]] = field(default_factory=dict)
+    regions: list[RawRegion] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

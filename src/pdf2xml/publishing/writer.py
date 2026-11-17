@@ -12,7 +12,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal, Any
 
 from lxml import etree
 
@@ -50,7 +50,10 @@ from pdf2xml.publishing.semantic import (
     build,
 )
 
-MML = "http://www.w3.org/1998/Math/MathML"
+if TYPE_CHECKING:
+    from pdf2xml.publishing.grobid import Grobid
+
+MML ="http://www.w3.org/1998/Math/MathML"
 XML_LANG = "{http://www.w3.org/XML/1998/namespace}lang"
 NSMAP = {"xlink": XLINK, "mml": MML}
 _TITLE = frozenset({"bold", "italic", "sc", "color"})   # typographic in headings and captions
@@ -68,6 +71,9 @@ class ExportResult:
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     stats: dict[str, int] = field(default_factory=dict)
+    # text left out on purpose: (reason, PDF page, text); text None for a whole page
+    dropped: list[tuple[str, int, str | None]] = field(default_factory=list)
+    diagnostics: dict[str, Any] = field(default_factory=dict)
 
 
 def _el(parent: etree._Element, tag: str, text: str | None = None, **attrs: str) -> etree._Element:
@@ -112,8 +118,14 @@ class _Writer:
                                keep_visual=profile.styling == "keep-visual",
                                notes=sem.note_ids)
         self.stats = {"tables": 0, "figures": 0, "lists": 0, "formulas": 0, "page_markers": 0}
+        self.dropped: list[tuple[str, int, str | None]] = []
         # pages whose marker waits for the next text (the page starts with a table, a box, …)
         self.pending: list[int] = []
+        # a book that prints one bibliography at the back: what every part without a reference
+        # list of its own cites (the citation scope of a chapter, the front and back matter)
+        self.book_refs: list[Reference] = [
+            r for m in sem.back if isinstance(m, Matter) and m.kind == "refs"
+            for r in m.references]
         self.page_by_folio: dict[str, int] = {}          # printed page number → PDF page
         for pg, f in sorted(sem.folios.items()):
             self.page_by_folio.setdefault(f.lower(), pg)
@@ -174,6 +186,12 @@ class _Writer:
             f = _el(parent, "disp-formula", id=self.sem.node_ids[id(n)])
             if n.latex:
                 _el(f, "tex-math", n.latex)
+            elif n.image:
+                # Source pixels preserve vector arrows and unknown symbols.
+                # Text runs remain in canonical XML for search/review, but are
+                # not presented as an equivalent verified math transcription.
+                g = _el(f, "graphic", mimetype="image", mime_subtype="png")
+                g.set(HREF, n.image)
             else:
                 self._inline(f, n.runs, n.style, links=False, flush=False)
         elif isinstance(n, Box):
@@ -212,6 +230,8 @@ class _Writer:
             parent.append(etree.ProcessingInstruction("query", q.text.replace("?>", "? >")))
         elif mode == "keep":
             _el(parent, "p", q.text, content_type="author-query")
+        else:
+            self.dropped.append(("author query (queries.mode: drop)", q.page, q.text))
 
     def _list(self, parent: etree._Element, lb: ListBlock) -> None:
         self.stats["lists"] += 1
@@ -223,6 +243,8 @@ class _Writer:
             li = _el(el, "list-item")
             if labels and it.marker:
                 _el(li, "label", it.marker)
+            elif it.marker:
+                self.dropped.append(("list marker (given by list-type)", it.page, it.marker))
             self._inline(_el(li, "p"), it.runs, it.style, key=it)
             for ch in it.children:
                 if isinstance(ch, ListBlock):
@@ -273,11 +295,17 @@ class _Writer:
     def _fig(self, parent: etree._Element, f: FloatObj) -> None:
         fig_b = f.block
         assert isinstance(fig_b, Figure)
+        if fig_b.decorative and not f.label and not f.title and fig_b.image:
+            graphic = _el(parent, "graphic", id=f.id, specific_use="decorative")
+            graphic.set(HREF, fig_b.image)
+            return
         self.stats["figures"] += 1
         fig = _el(parent, "fig", id=f.id)
         self._caption(fig, f)
         if fig_b.alt:
             _el(fig, "alt-text", fig_b.alt)
+        elif f.title:
+            _el(fig, "alt-text", plain_text(f.title))
         if fig_b.image:
             ext = Path(fig_b.image).suffix.lstrip(".").lower() or "png"
             g = _el(fig, "graphic", mimetype="image", mime_subtype="jpeg" if ext == "jpg" else ext)
@@ -295,9 +323,92 @@ class _Writer:
             _el(el, "label", s.label)
         self._inline(_el(el, "title"), s.title, s.heading.style, title=True, links=False,
                      key=s.heading)
-        self._nodes(el, s.nodes)
+        for node in s.nodes:
+            if not (s.sec_type == "practice-questions" and isinstance(node, ListBlock)
+                    and self._questions(el, node, s.id)):
+                self._node(el, node)
         for ch in s.children:
             self._sec(el, ch)
+
+    def _questions(self, parent: etree._Element, block: ListBlock, prefix: str) -> bool:
+        """Only promote unambiguous numbered questions with lettered options.
+
+        Unknown structures stay ordinary lists. No correct-answer flags are inferred.
+        """
+        def promotable(item: ListItem) -> bool:
+            if not re.fullmatch(r"\d+[.)]?", item.marker or "") or not item.children:
+                return False
+            if len(item.children) != 1 or not isinstance(item.children[0], ListBlock):
+                return False
+            options = item.children[0].items
+            if len(options) < 2 or any(not re.fullmatch(r"[a-zA-Z][.)]?", o.marker or "")
+                                      or o.children for o in options):
+                return False
+            labels = [(o.marker or "").rstrip(".)").lower() for o in options]
+            return labels == [chr(ord("a") + i) for i in range(len(options))]
+
+        matching: dict[int, tuple[int, list[ListItem]]] = {}
+        for index, item in enumerate(block.items):
+            span = re.fullmatch(r"(\d+)[–-](\d+)[.)]?", item.marker or "")
+            if not span or len(item.children) != 1 or not isinstance(item.children[0], ListBlock):
+                continue
+            start, end = int(span[1]), int(span[2])
+            stems = block.items[index + 1:index + 2 + end - start]
+            if (start <= end and len(stems) == end - start + 1
+                    and all((s.marker or '').rstrip('.)') == str(start + n) and not s.children
+                            for n, s in enumerate(stems))):
+                matching[index] = (end, stems)
+        if not matching and not any(promotable(item) for item in block.items):
+            return False
+        pending: list[ListItem] = []
+        index = 0
+        while index < len(block.items):
+            item = block.items[index]
+            if index in matching:
+                if pending:
+                    self._list(parent, block.model_copy(update={"items": pending}))
+                    pending = []
+                _, stems = matching[index]
+                group = _el(parent, "question-wrap-group", id=f"{prefix}-match{index + 1}")
+                preamble = _el(group, "question-preamble")
+                _el(preamble, "label", item.marker)
+                self._inline(_el(preamble, "p"), item.runs, item.style, key=item)
+                choices = item.children[0]
+                assert isinstance(choices, ListBlock)
+                self._list(preamble, choices)
+                for stem in stems:
+                    number = (stem.marker or "").rstrip(".)")
+                    wrapper = _el(group, "question-wrap", id=f"{prefix}-q{number}")
+                    response = ("fill-in-the-blank" if re.search(r"_{2,}", runs_text(stem.runs))
+                                else "short-answer")
+                    question = _el(wrapper, "question", question_response_type=response)
+                    _el(question, "label", stem.marker)
+                    self._inline(_el(question, "p"), stem.runs, stem.style, key=stem)
+                    self.stats["questions"] = self.stats.get("questions", 0) + 1
+                index += 1 + len(stems)
+                continue
+            index += 1
+            if not promotable(item):
+                pending.append(item)
+                continue
+            if pending:
+                self._list(parent, block.model_copy(update={"items": pending}))
+                pending = []
+            number = (item.marker or "").rstrip(".)")
+            wrapper = _el(parent, "question-wrap", id=f"{prefix}-q{number}")
+            question = _el(wrapper, "question", question_response_type="multiple-choice")
+            _el(question, "label", item.marker)
+            self._inline(_el(question, "p"), item.runs, item.style, key=item)
+            options_list = item.children[0]
+            assert isinstance(options_list, ListBlock)
+            for option in options_list.items:
+                element = _el(question, "option")
+                _el(element, "label", option.marker)
+                self._inline(_el(element, "p"), option.runs, option.style, key=option)
+            self.stats["questions"] = self.stats.get("questions", 0) + 1
+        if pending:
+            self._list(parent, block.model_copy(update={"items": pending}))
+        return True
 
     def _body(self, parent: etree._Element, tag: str = "body",
               preamble: Sequence[Node] | None = None,
@@ -396,11 +507,20 @@ class _Writer:
             elif not isinstance(x, Matter):
                 self._node(parent, x)  # type: ignore[arg-type]
 
-    def _content(self, parent: etree._Element, m: Matter) -> None:
-        self._items(parent, m.items)
-        self._nodes(parent, m.nodes)
-        for s in m.sections:
-            self._sec(parent, s)
+    def _content(self, parent: etree._Element, m: Matter, *, include_refs: bool = True) -> None:
+        previous_refs, previous_notes = self.ctx.references, self.ctx.notes
+        if m.references:
+            self.ctx.scope(m.references, previous_notes)
+        try:
+            self._items(parent, m.items)
+            self._nodes(parent, m.nodes)
+            for s in m.sections:
+                self._sec(parent, s)
+            if m.references and include_refs:
+                self._ref_list(parent, m.references, m.ref_title)
+        finally:
+            if m.references:
+                self.ctx.scope(previous_refs, previous_notes)
 
     def _matters(self, parent: etree._Element, ms: Sequence[Matter], zone: str) -> None:
         """``zone``: "front" (BITS front-matter), "back" (JATS back, BITS book-part back) or
@@ -477,9 +597,11 @@ class _Writer:
         else:
             self._hold(m)
         body = etree.Element(body_tag)
-        self._content(body, m)
+        self._content(body, m, include_refs=False)
         if any(isinstance(c.tag, str) for c in body):
             el.append(body)
+        if m.references:
+            self._ref_list(_el(el, "back"), m.references, m.ref_title)
 
     def _toc(self, parent: etree._Element, m: Matter) -> None:
         el = _el(parent, "toc", id=m.id)
@@ -660,7 +782,8 @@ class _Writer:
         self._abstract_kwds(bpm, u.abstract, u.abstract_title, u.keywords)
         if u.front:
             self._matters(_el(bp, "front-matter"), u.front, "front")
-        self.ctx.scope(u.references, u.note_ids)
+        refs = u.references or self.book_refs
+        self.ctx.scope(refs, u.note_ids)
         if u.preamble or u.sections or u.children:
             body = _el(bp, "body")
             self._nodes(body, u.preamble)
@@ -668,7 +791,7 @@ class _Writer:
                 self._sec(body, s)
             for c in u.children:
                 self._unit(body, c)
-            self.ctx.scope(u.references, u.note_ids)
+            self.ctx.scope(refs, u.note_ids)
         if u.footnotes or u.references or u.back:
             self._back_items(_el(bp, "back"), u.footnotes, u.references, u.ref_title, u.back)
 
@@ -858,7 +981,7 @@ class _Writer:
         root.set("dtd-version", o.version)
         self._book_meta(root)
         if sem.front:
-            self.ctx.scope([], {})
+            self.ctx.scope(self.book_refs, {})
             self._matters(_el(root, "front-matter"), sem.front, "front")
         body = _el(root, "book-body")
         for u in sem.units:
@@ -867,11 +990,11 @@ class _Writer:
             _el(_el(body, "book-part", book_part_type=o.book_part_type), "book-part-meta")
         if sem.back or sem.footnotes:
             bb = _el(root, "book-back")
-            self.ctx.scope([], {})
+            self.ctx.scope(self.book_refs, {})
             for x in sem.back:
                 if isinstance(x, Unit):
                     self._unit(bb, x)
-                    self.ctx.scope([], {})
+                    self.ctx.scope(self.book_refs, {})
                 else:
                     self._matter(bb, x, "book-back")
             if sem.footnotes:
@@ -969,13 +1092,13 @@ def schema_key(target: Target, profile: Profile) -> str:
 
 
 def export(doc: Document, out_dir: Path, target: Target, profile: Profile, meta: Metadata,
-           path: Path | None = None) -> ExportResult:
+           path: Path | None = None, grobid: Grobid | None = None) -> ExportResult:
     key = schema_key(target, profile)
     schema = schemas.SCHEMAS[key]
     book: bool | None = False
     if target == "bits":
         book = {"book": True, "book-part-wrapper": False}.get(profile.bits.root)
-    sem = build(doc, profile, meta, book=book)
+    sem = build(doc, profile, meta, book=book, grobid=grobid)
     w = _Writer(doc, sem, profile, meta, target, schema)
     if target == "jats":
         root = w.article()
@@ -998,17 +1121,27 @@ def export(doc: Document, out_dir: Path, target: Target, profile: Profile, meta:
     stats = {**sem.stats, **w.stats, "xrefs": w.ctx.stats["xref"],
              "ext_links": w.ctx.stats["ext-link"], "doi_pub_ids": w.ctx.stats["pub-id"]}
     warnings = list(sem.warnings)
+    dropped: list[tuple[str, int, str | None]] = [*sem.dropped, *w.dropped]
     if target == "jats" and sem.toc is not None:
         warnings = [x for x in warnings if not x.startswith("TOC:")]
         warnings.append("the printed table of contents is not written to JATS (the tag set has "
                         "no element for it)")
+        dropped.extend(("contents page (JATS has no element for it)", pg, None)
+                       for pg in sem.toc_pages)
+    if grobid is not None:
+        warnings.extend(grobid.errors)
     if w.ctx.unresolved:
         stats["citations_unresolved"] = sum(w.ctx.unresolved.values())
         names = sorted(w.ctx.unresolved, key=lambda k: (-w.ctx.unresolved[k], k))
-        more = f" (+{len(names) - 12} more)" if len(names) > 12 else ""
         warnings.append(f"{len(names)} author-year citation(s) match no reference: "
-                        + "; ".join(names[:12]) + more)
-    return ExportResult(target, key, path, not errors, errors, warnings, stats)
+                        + "; ".join(names))
+    diagnostics = {"unresolved_citations": dict(w.ctx.unresolved),
+                   "reference_tagging": [{"id": ref.get("id"),
+                       "publication_type": next(iter(ref.xpath('./mixed-citation/@publication-type')), None),
+                       "tagged_fields": sorted({str(e.tag) for e in ref.iter() if e is not ref and e.tag not in ("mixed-citation", "label")}),
+                       "text": "".join(ref.itertext())}
+                       for ref in parsed.iter("ref")]}
+    return ExportResult(target, key, path, not errors, errors, warnings, stats, dropped, diagnostics)
 
 
 def _drop_dangling(root: etree._Element) -> None:

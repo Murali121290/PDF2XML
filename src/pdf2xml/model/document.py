@@ -86,6 +86,8 @@ class _BlockBase(_Model):
     page: int
     bbox: BBox
     style: str | None = None
+    source_ref: str | None = None
+    region_id: str | None = None
 
     @field_validator("bbox")
     @classmethod
@@ -98,6 +100,7 @@ class Heading(_BlockBase):
     level: int = Field(ge=1, le=6)
     runs: list[Run]
     para: ParaProps | None = None
+    role: Literal["chapter", "module", "section"] | None = None
 
 
 class Paragraph(_BlockBase):
@@ -123,14 +126,15 @@ class Formula(_BlockBase):
     display: bool = True
     latex: str | None = None
     mathml: str | None = None
-    runs: list[Run] = []             # text-layer fallback
+    image: str | None = None        # source crop: retains vector relations/glyphs
+    runs: list[Run] = Field(default_factory=list)             # text-layer fallback
 
 
 class ListItem(_BlockBase):
     type: Literal["list_item"] = "list_item"
     marker: str | None = None
     runs: list[Run]
-    children: list[Block] = []       # nested lists
+    children: list[Block] = Field(default_factory=list)       # nested lists
     para: ParaProps | None = None
 
 
@@ -165,6 +169,7 @@ class Figure(_BlockBase):
     image: str | None = None         # path relative to the output dir, e.g. assets/p1_b5.png
     alt: str | None = None
     caption_ref: str | None = None
+    decorative: bool | None = None
 
 
 class Box(_BlockBase):
@@ -201,6 +206,14 @@ class PageInfo(_Model):
     height: float
 
 
+class OutlineEntry(_Model):
+    page: int = Field(ge=1)
+    title: str
+    label: str | None = None
+    kind: Literal["chapter", "front", "glossary", "index", "section"] = "section"
+    depth: int = Field(default=0, ge=0)
+
+
 class Meta(_Model):
     schema_version: str = SCHEMA_VERSION
     source: str
@@ -212,18 +225,19 @@ class Meta(_Model):
     tagged: bool = False
     engine: str = ""
     style_backend: str = ""
-    warnings: list[str] = []
-    stats: dict[str, int] = {}
+    warnings: list[str] = Field(default_factory=list)
+    stats: dict[str, int] = Field(default_factory=dict)
+    outline: list[OutlineEntry] | None = None
 
 
 class Document(_Model):
     meta: Meta
-    styles: dict[str, Style] = {}
-    pages: list[PageInfo] = []
-    body: list[Block] = []
-    footnotes: list[Block] = []
-    references: list[Block] = []
-    artifacts: list[Artifact] = []
+    styles: dict[str, Style] = Field(default_factory=dict)
+    pages: list[PageInfo] = Field(default_factory=list)
+    body: list[Block] = Field(default_factory=list)
+    footnotes: list[Block] = Field(default_factory=list)
+    references: list[Block] = Field(default_factory=list)
+    artifacts: list[Artifact] = Field(default_factory=list)
 
 
 for _m in (ListItem, Box, Document):

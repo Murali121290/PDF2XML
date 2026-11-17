@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF2XML · Layout QA</title><link rel="stylesheet" href="/inspector/inspector.css">
+<script src="/inspector/quality-report.js" defer></script><script src="/inspector/inspector.js" defer></script></head>
+<body>
+<header class="appbar">
+  <a class="brand" href="/inspect"><span class="brandmark">P/X</span><span>PDF2XML <small>LAYOUT QA</small></span></a>
+  <label class="document-picker">Document <select id="document" aria-label="Document"></select></label>
+  <div class="app-actions"><span id="source-status" class="status">Opening document…</span>
+    <label class="button" id="attach-label">Attach original PDF<input id="attach" type="file" accept="application/pdf,.pdf" hidden></label>
+    <a href="/upload" class="button">Upload & convert</a><a id="proof-link" href="/" class="text-link">Proof view ↗</a>
+  </div>
+</header>
+<div class="workspacebar">
+  <div class="page-nav"><button id="previous" aria-label="Previous PDF page">←</button>
+    <label>PDF page <input id="page" type="number" min="1" value="1" aria-label="PDF page"></label>
+    <span id="page-total">of —</span><button id="next" aria-label="Next PDF page">→</button></div>
+  <div class="view-options"><label><input id="show-boxes" type="checkbox" checked> Boxes</label>
+    <label><input id="show-order" type="checkbox" checked> Order numbers</label>
+    <label><input id="show-flow" type="checkbox"> Flow arrows</label>
+    <label><input id="show-decoration" type="checkbox"> Decorations</label></div>
+  <div class="workspace-actions"><label><input id="live" type="checkbox" checked> <span id="live-dot" class="live-dot"></span> Live</label>
+    <button id="refresh" title="Reload this page and XML">Refresh</button>
+    <button id="focus-workspace" aria-pressed="false" title="Hide the app header for more working space">Focus</button>
+    <button id="checks" class="quality">Quality Report</button></div>
+</div>
+<div id="notice" role="status" hidden></div>
+<main id="workspace">
+  <section class="pdf-pane" aria-label="Source PDF with layout annotations">
+    <div class="pane-heading"><div><h1>PDF <span class="heading-description">· layout & reading order</span></h1></div>
+      <button id="legend-toggle" aria-expanded="false" aria-controls="legend" title="Block colors and filters">Colors</button>
+      <div class="zoom-controls"><button id="zoom-out" aria-label="Zoom out">−</button>
+        <button id="fit-page" class="active" title="Show the entire PDF page">Fit page</button><button id="fit" title="Fill the PDF pane width and scroll vertically">Fit width</button>
+        <button id="zoom-in" aria-label="Zoom in">+</button><span id="zoom-value">100%</span></div></div>
+    <div id="legend" class="legend" aria-label="Block color legend and filters" hidden></div>
+    <div id="pdf-scroll" class="pdf-scroll"><div id="paper" class="paper" hidden>
+      <img id="pdf-image" alt="Original PDF page"><svg id="overlay" xmlns="http://www.w3.org/2000/svg" aria-label="Detected layout blocks"></svg>
+    </div><div id="pdf-empty" class="empty-state"><strong>Opening your document</strong><p>Loading layout evidence and XML.</p></div></div>
+    <div class="selection-panel" id="details-panel"><div class="selection-tabs"><button id="selection-tab" aria-expanded="false" aria-controls="details-content">Block details</button>
+      <button id="order-tab" aria-expanded="false" aria-controls="details-content">Reading order</button>
+      <span id="selection-summary">Click a box to inspect XML</span><span id="block-count"></span>
+      <button id="details-close" aria-label="Close block details" hidden>×</button></div>
+      <div id="details-content" hidden>
+      <div id="selection" class="selection"><p class="muted">Click a colored box to see its matching XML.</p></div>
+      <div id="order-list" class="order-list" hidden></div></div></div>
+  </section>
+  <div id="splitter" role="separator" aria-orientation="vertical" aria-label="Resize PDF and XML panes" tabindex="0"></div>
+  <section class="xml-pane" aria-label="XML source">
+    <div class="pane-heading"><div><h2>XML source</h2></div>
+      <select id="xml-file" aria-label="XML format"></select><a id="download" class="button" download>Download ↓</a></div>
+    <div class="xml-tools"><div class="segmented"><button id="scope-page" class="active">Page context</button><button id="scope-full">Full XML</button></div>
+      <label class="search"><span>⌕</span><input id="search" placeholder="Find in XML · Enter for next" aria-label="Find in XML"><button id="find-next" aria-label="Find next">↓</button></label></div>
+    <div class="xml-context"><span id="xml-context">Choose a PDF block</span><span id="match-status"></span></div>
+    <div id="xml-scroll" class="xml-scroll" tabindex="0" aria-label="XML lines"><div id="xml-lines"></div></div>
+    <div id="mapping-note" class="mapping-note">Canonical XML provides exact block links.</div>
+  </section>
+</main>
+<footer><span id="status-text">Colors identify block types. Numbers show canonical reading order.</span><span>PDF ← → XML</span></footer>
+<dialog id="check-dialog" style="width:min(1200px,96vw)"><div class="dialog-heading"><h2>Full Quality Report</h2><button id="close-checks" aria-label="Close checks">×</button></div>
+  <p class="muted">Automated checks are separate from editorial approval.</p><div id="check-content"></div></dialog>
+</body></html>

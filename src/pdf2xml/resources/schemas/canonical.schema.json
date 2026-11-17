@@ -4,21 +4,6 @@
       "additionalProperties": false,
       "description": "Text that is not content: running headers/footers, page numbers, figure labels.",
       "properties": {
-        "kind": {
-          "enum": [
-            "header",
-            "footer",
-            "page_number",
-            "figure_text",
-            "other"
-          ],
-          "title": "Kind",
-          "type": "string"
-        },
-        "page": {
-          "title": "Page",
-          "type": "integer"
-        },
         "bbox": {
           "maxItems": 4,
           "minItems": 4,
@@ -38,6 +23,21 @@
           ],
           "title": "Bbox",
           "type": "array"
+        },
+        "kind": {
+          "enum": [
+            "header",
+            "footer",
+            "page_number",
+            "figure_text",
+            "other"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "page": {
+          "title": "Page",
+          "type": "integer"
         },
         "text": {
           "title": "Text",
@@ -56,15 +56,6 @@
     "Box": {
       "additionalProperties": false,
       "properties": {
-        "id": {
-          "default": "",
-          "title": "Id",
-          "type": "string"
-        },
-        "page": {
-          "title": "Page",
-          "type": "integer"
-        },
         "bbox": {
           "maxItems": 4,
           "minItems": 4,
@@ -84,39 +75,6 @@
           ],
           "title": "Bbox",
           "type": "array"
-        },
-        "style": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Style"
-        },
-        "type": {
-          "const": "box",
-          "default": "box",
-          "title": "Type",
-          "type": "string"
-        },
-        "role": {
-          "enum": [
-            "exercise",
-            "example",
-            "note",
-            "tip",
-            "warning",
-            "key_point",
-            "sidebar",
-            "pullquote",
-            "definition"
-          ],
-          "title": "Role",
-          "type": "string"
         },
         "children": {
           "items": {
@@ -170,20 +128,7 @@
           },
           "title": "Children",
           "type": "array"
-        }
-      },
-      "required": [
-        "page",
-        "bbox",
-        "role",
-        "children"
-      ],
-      "title": "Box",
-      "type": "object"
-    },
-    "Caption": {
-      "additionalProperties": false,
-      "properties": {
+        },
         "id": {
           "default": "",
           "title": "Id",
@@ -193,25 +138,44 @@
           "title": "Page",
           "type": "integer"
         },
-        "bbox": {
-          "maxItems": 4,
-          "minItems": 4,
-          "prefixItems": [
+        "region_id": {
+          "anyOf": [
             {
-              "type": "number"
+              "type": "string"
             },
             {
-              "type": "number"
-            },
-            {
-              "type": "number"
-            },
-            {
-              "type": "number"
+              "type": "null"
             }
           ],
-          "title": "Bbox",
-          "type": "array"
+          "default": null,
+          "title": "Region Id"
+        },
+        "role": {
+          "enum": [
+            "exercise",
+            "example",
+            "note",
+            "tip",
+            "warning",
+            "key_point",
+            "sidebar",
+            "pullquote",
+            "definition"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "source_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Ref"
         },
         "style": {
           "anyOf": [
@@ -226,62 +190,24 @@
           "title": "Style"
         },
         "type": {
-          "const": "caption",
-          "default": "caption",
+          "const": "box",
+          "default": "box",
           "title": "Type",
           "type": "string"
-        },
-        "runs": {
-          "items": {
-            "$ref": "#/$defs/Run"
-          },
-          "title": "Runs",
-          "type": "array"
-        },
-        "target": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Target"
-        },
-        "para": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ParaProps"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
         }
       },
       "required": [
         "page",
         "bbox",
-        "runs"
+        "role",
+        "children"
       ],
-      "title": "Caption",
+      "title": "Box",
       "type": "object"
     },
-    "Code": {
+    "Caption": {
       "additionalProperties": false,
       "properties": {
-        "id": {
-          "default": "",
-          "title": "Id",
-          "type": "string"
-        },
-        "page": {
-          "title": "Page",
-          "type": "integer"
-        },
         "bbox": {
           "maxItems": 4,
           "minItems": 4,
@@ -301,6 +227,159 @@
           ],
           "title": "Bbox",
           "type": "array"
+        },
+        "id": {
+          "default": "",
+          "title": "Id",
+          "type": "string"
+        },
+        "page": {
+          "title": "Page",
+          "type": "integer"
+        },
+        "para": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ParaProps"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "region_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Region Id"
+        },
+        "runs": {
+          "items": {
+            "$ref": "#/$defs/Run"
+          },
+          "title": "Runs",
+          "type": "array"
+        },
+        "source_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Ref"
+        },
+        "style": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Style"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target"
+        },
+        "type": {
+          "const": "caption",
+          "default": "caption",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "page",
+        "bbox",
+        "runs"
+      ],
+      "title": "Caption",
+      "type": "object"
+    },
+    "Code": {
+      "additionalProperties": false,
+      "properties": {
+        "bbox": {
+          "maxItems": 4,
+          "minItems": 4,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Bbox",
+          "type": "array"
+        },
+        "id": {
+          "default": "",
+          "title": "Id",
+          "type": "string"
+        },
+        "page": {
+          "title": "Page",
+          "type": "integer"
+        },
+        "region_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Region Id"
+        },
+        "runs": {
+          "items": {
+            "$ref": "#/$defs/Run"
+          },
+          "title": "Runs",
+          "type": "array"
+        },
+        "source_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Ref"
         },
         "style": {
           "anyOf": [
@@ -319,13 +398,6 @@
           "default": "code",
           "title": "Type",
           "type": "string"
-        },
-        "runs": {
-          "items": {
-            "$ref": "#/$defs/Run"
-          },
-          "title": "Runs",
-          "type": "array"
         }
       },
       "required": [
@@ -339,14 +411,17 @@
     "Figure": {
       "additionalProperties": false,
       "properties": {
-        "id": {
-          "default": "",
-          "title": "Id",
-          "type": "string"
-        },
-        "page": {
-          "title": "Page",
-          "type": "integer"
+        "alt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Alt"
         },
         "bbox": {
           "maxItems": 4,
@@ -367,6 +442,75 @@
           ],
           "title": "Bbox",
           "type": "array"
+        },
+        "caption_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Caption Ref"
+        },
+        "decorative": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Decorative"
+        },
+        "id": {
+          "default": "",
+          "title": "Id",
+          "type": "string"
+        },
+        "image": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Image"
+        },
+        "page": {
+          "title": "Page",
+          "type": "integer"
+        },
+        "region_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Region Id"
+        },
+        "source_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Ref"
         },
         "style": {
           "anyOf": [
@@ -385,42 +529,6 @@
           "default": "figure",
           "title": "Type",
           "type": "string"
-        },
-        "image": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Image"
-        },
-        "alt": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Alt"
-        },
-        "caption_ref": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Caption Ref"
         }
       },
       "required": [
@@ -433,15 +541,6 @@
     "Formula": {
       "additionalProperties": false,
       "properties": {
-        "id": {
-          "default": "",
-          "title": "Id",
-          "type": "string"
-        },
-        "page": {
-          "title": "Page",
-          "type": "integer"
-        },
         "bbox": {
           "maxItems": 4,
           "minItems": 4,
@@ -462,7 +561,17 @@
           "title": "Bbox",
           "type": "array"
         },
-        "style": {
+        "display": {
+          "default": true,
+          "title": "Display",
+          "type": "boolean"
+        },
+        "id": {
+          "default": "",
+          "title": "Id",
+          "type": "string"
+        },
+        "image": {
           "anyOf": [
             {
               "type": "string"
@@ -472,18 +581,7 @@
             }
           ],
           "default": null,
-          "title": "Style"
-        },
-        "type": {
-          "const": "formula",
-          "default": "formula",
-          "title": "Type",
-          "type": "string"
-        },
-        "display": {
-          "default": true,
-          "title": "Display",
-          "type": "boolean"
+          "title": "Image"
         },
         "latex": {
           "anyOf": [
@@ -509,6 +607,22 @@
           "default": null,
           "title": "Mathml"
         },
+        "page": {
+          "title": "Page",
+          "type": "integer"
+        },
+        "region_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Region Id"
+        },
         "runs": {
           "default": [],
           "items": {
@@ -516,6 +630,36 @@
           },
           "title": "Runs",
           "type": "array"
+        },
+        "source_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Ref"
+        },
+        "style": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Style"
+        },
+        "type": {
+          "const": "formula",
+          "default": "formula",
+          "title": "Type",
+          "type": "string"
         }
       },
       "required": [
@@ -528,15 +672,6 @@
     "Heading": {
       "additionalProperties": false,
       "properties": {
-        "id": {
-          "default": "",
-          "title": "Id",
-          "type": "string"
-        },
-        "page": {
-          "title": "Page",
-          "type": "integer"
-        },
         "bbox": {
           "maxItems": 4,
           "minItems": 4,
@@ -556,6 +691,80 @@
           ],
           "title": "Bbox",
           "type": "array"
+        },
+        "id": {
+          "default": "",
+          "title": "Id",
+          "type": "string"
+        },
+        "level": {
+          "maximum": 6,
+          "minimum": 1,
+          "title": "Level",
+          "type": "integer"
+        },
+        "page": {
+          "title": "Page",
+          "type": "integer"
+        },
+        "para": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ParaProps"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "region_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Region Id"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "enum": [
+                "chapter",
+                "module",
+                "section"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role"
+        },
+        "runs": {
+          "items": {
+            "$ref": "#/$defs/Run"
+          },
+          "title": "Runs",
+          "type": "array"
+        },
+        "source_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Ref"
         },
         "style": {
           "anyOf": [
@@ -574,30 +783,6 @@
           "default": "heading",
           "title": "Type",
           "type": "string"
-        },
-        "level": {
-          "maximum": 6,
-          "minimum": 1,
-          "title": "Level",
-          "type": "integer"
-        },
-        "runs": {
-          "items": {
-            "$ref": "#/$defs/Run"
-          },
-          "title": "Runs",
-          "type": "array"
-        },
-        "para": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ParaProps"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
         }
       },
       "required": [
@@ -612,15 +797,6 @@
     "ListBlock": {
       "additionalProperties": false,
       "properties": {
-        "id": {
-          "default": "",
-          "title": "Id",
-          "type": "string"
-        },
-        "page": {
-          "title": "Page",
-          "type": "integer"
-        },
         "bbox": {
           "maxItems": 4,
           "minItems": 4,
@@ -640,6 +816,51 @@
           ],
           "title": "Bbox",
           "type": "array"
+        },
+        "id": {
+          "default": "",
+          "title": "Id",
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/ListItem"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "ordered": {
+          "default": false,
+          "title": "Ordered",
+          "type": "boolean"
+        },
+        "page": {
+          "title": "Page",
+          "type": "integer"
+        },
+        "region_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Region Id"
+        },
+        "source_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Ref"
         },
         "style": {
           "anyOf": [
@@ -658,18 +879,6 @@
           "default": "list",
           "title": "Type",
           "type": "string"
-        },
-        "ordered": {
-          "default": false,
-          "title": "Ordered",
-          "type": "boolean"
-        },
-        "items": {
-          "items": {
-            "$ref": "#/$defs/ListItem"
-          },
-          "title": "Items",
-          "type": "array"
         }
       },
       "required": [
@@ -683,15 +892,6 @@
     "ListItem": {
       "additionalProperties": false,
       "properties": {
-        "id": {
-          "default": "",
-          "title": "Id",
-          "type": "string"
-        },
-        "page": {
-          "title": "Page",
-          "type": "integer"
-        },
         "bbox": {
           "maxItems": 4,
           "minItems": 4,
@@ -710,43 +910,6 @@
             }
           ],
           "title": "Bbox",
-          "type": "array"
-        },
-        "style": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Style"
-        },
-        "type": {
-          "const": "list_item",
-          "default": "list_item",
-          "title": "Type",
-          "type": "string"
-        },
-        "marker": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Marker"
-        },
-        "runs": {
-          "items": {
-            "$ref": "#/$defs/Run"
-          },
-          "title": "Runs",
           "type": "array"
         },
         "children": {
@@ -803,6 +966,27 @@
           "title": "Children",
           "type": "array"
         },
+        "id": {
+          "default": "",
+          "title": "Id",
+          "type": "string"
+        },
+        "marker": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Marker"
+        },
+        "page": {
+          "title": "Page",
+          "type": "integer"
+        },
         "para": {
           "anyOf": [
             {
@@ -813,6 +997,55 @@
             }
           ],
           "default": null
+        },
+        "region_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Region Id"
+        },
+        "runs": {
+          "items": {
+            "$ref": "#/$defs/Run"
+          },
+          "title": "Runs",
+          "type": "array"
+        },
+        "source_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Ref"
+        },
+        "style": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Style"
+        },
+        "type": {
+          "const": "list_item",
+          "default": "list_item",
+          "title": "Type",
+          "type": "string"
         }
       },
       "required": [
@@ -826,23 +1059,6 @@
     "Meta": {
       "additionalProperties": false,
       "properties": {
-        "schema_version": {
-          "default": "1",
-          "title": "Schema Version",
-          "type": "string"
-        },
-        "source": {
-          "title": "Source",
-          "type": "string"
-        },
-        "sha256": {
-          "title": "Sha256",
-          "type": "string"
-        },
-        "pages": {
-          "title": "Pages",
-          "type": "integer"
-        },
         "doc_type": {
           "default": "generic",
           "enum": [
@@ -853,6 +1069,66 @@
           ],
           "title": "Doc Type",
           "type": "string"
+        },
+        "engine": {
+          "default": "",
+          "title": "Engine",
+          "type": "string"
+        },
+        "lang": {
+          "default": "en",
+          "title": "Lang",
+          "type": "string"
+        },
+        "outline": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/OutlineEntry"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Outline"
+        },
+        "pages": {
+          "title": "Pages",
+          "type": "integer"
+        },
+        "schema_version": {
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "stats": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "default": {},
+          "title": "Stats",
+          "type": "object"
+        },
+        "style_backend": {
+          "default": "",
+          "title": "Style Backend",
+          "type": "string"
+        },
+        "tagged": {
+          "default": false,
+          "title": "Tagged",
+          "type": "boolean"
         },
         "title": {
           "anyOf": [
@@ -866,26 +1142,6 @@
           "default": null,
           "title": "Title"
         },
-        "lang": {
-          "default": "en",
-          "title": "Lang",
-          "type": "string"
-        },
-        "tagged": {
-          "default": false,
-          "title": "Tagged",
-          "type": "boolean"
-        },
-        "engine": {
-          "default": "",
-          "title": "Engine",
-          "type": "string"
-        },
-        "style_backend": {
-          "default": "",
-          "title": "Style Backend",
-          "type": "string"
-        },
         "warnings": {
           "default": [],
           "items": {
@@ -893,14 +1149,6 @@
           },
           "title": "Warnings",
           "type": "array"
-        },
-        "stats": {
-          "additionalProperties": {
-            "type": "integer"
-          },
-          "default": {},
-          "title": "Stats",
-          "type": "object"
         }
       },
       "required": [
@@ -911,19 +1159,69 @@
       "title": "Meta",
       "type": "object"
     },
+    "OutlineEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "depth": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Depth",
+          "type": "integer"
+        },
+        "kind": {
+          "default": "section",
+          "enum": [
+            "chapter",
+            "front",
+            "glossary",
+            "index",
+            "section"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
+        "page": {
+          "minimum": 1,
+          "title": "Page",
+          "type": "integer"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "page",
+        "title"
+      ],
+      "title": "OutlineEntry",
+      "type": "object"
+    },
     "PageInfo": {
       "additionalProperties": false,
       "properties": {
+        "height": {
+          "title": "Height",
+          "type": "number"
+        },
         "n": {
           "title": "N",
           "type": "integer"
         },
         "width": {
           "title": "Width",
-          "type": "number"
-        },
-        "height": {
-          "title": "Height",
           "type": "number"
         }
       },
@@ -981,7 +1279,7 @@
           "default": null,
           "title": "Indent Left"
         },
-        "space_before": {
+        "line_height": {
           "anyOf": [
             {
               "type": "number"
@@ -991,7 +1289,7 @@
             }
           ],
           "default": null,
-          "title": "Space Before"
+          "title": "Line Height"
         },
         "space_after": {
           "anyOf": [
@@ -1005,7 +1303,7 @@
           "default": null,
           "title": "Space After"
         },
-        "line_height": {
+        "space_before": {
           "anyOf": [
             {
               "type": "number"
@@ -1015,7 +1313,7 @@
             }
           ],
           "default": null,
-          "title": "Line Height"
+          "title": "Space Before"
         }
       },
       "title": "ParaProps",
@@ -1024,15 +1322,6 @@
     "Paragraph": {
       "additionalProperties": false,
       "properties": {
-        "id": {
-          "default": "",
-          "title": "Id",
-          "type": "string"
-        },
-        "page": {
-          "title": "Page",
-          "type": "integer"
-        },
         "bbox": {
           "maxItems": 4,
           "minItems": 4,
@@ -1053,6 +1342,57 @@
           "title": "Bbox",
           "type": "array"
         },
+        "id": {
+          "default": "",
+          "title": "Id",
+          "type": "string"
+        },
+        "page": {
+          "title": "Page",
+          "type": "integer"
+        },
+        "para": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ParaProps"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "region_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Region Id"
+        },
+        "runs": {
+          "items": {
+            "$ref": "#/$defs/Run"
+          },
+          "title": "Runs",
+          "type": "array"
+        },
+        "source_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Ref"
+        },
         "style": {
           "anyOf": [
             {
@@ -1070,24 +1410,6 @@
           "default": "paragraph",
           "title": "Type",
           "type": "string"
-        },
-        "runs": {
-          "items": {
-            "$ref": "#/$defs/Run"
-          },
-          "title": "Runs",
-          "type": "array"
-        },
-        "para": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ParaProps"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
         }
       },
       "required": [
@@ -1101,10 +1423,6 @@
     "Run": {
       "additionalProperties": false,
       "properties": {
-        "text": {
-          "title": "Text",
-          "type": "string"
-        },
         "bold": {
           "anyOf": [
             {
@@ -1116,78 +1434,6 @@
           ],
           "default": null,
           "title": "Bold"
-        },
-        "italic": {
-          "anyOf": [
-            {
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Italic"
-        },
-        "underline": {
-          "anyOf": [
-            {
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Underline"
-        },
-        "strike": {
-          "anyOf": [
-            {
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Strike"
-        },
-        "sup": {
-          "anyOf": [
-            {
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Sup"
-        },
-        "sub": {
-          "anyOf": [
-            {
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Sub"
-        },
-        "small_caps": {
-          "anyOf": [
-            {
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Small Caps"
         },
         "color": {
           "anyOf": [
@@ -1213,17 +1459,17 @@
           "default": null,
           "title": "Font"
         },
-        "size": {
+        "italic": {
           "anyOf": [
             {
-              "type": "number"
+              "type": "boolean"
             },
             {
               "type": "null"
             }
           ],
           "default": null,
-          "title": "Size"
+          "title": "Italic"
         },
         "link": {
           "anyOf": [
@@ -1236,6 +1482,82 @@
           ],
           "default": null,
           "title": "Link"
+        },
+        "size": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Size"
+        },
+        "small_caps": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Small Caps"
+        },
+        "strike": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Strike"
+        },
+        "sub": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sub"
+        },
+        "sup": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sup"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "underline": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Underline"
         }
       },
       "required": [
@@ -1248,32 +1570,23 @@
       "additionalProperties": false,
       "description": "A catalogue entry: a character-level look shared by many blocks/runs.",
       "properties": {
-        "font": {
-          "title": "Font",
-          "type": "string"
-        },
-        "size": {
-          "title": "Size",
-          "type": "number"
-        },
         "bold": {
           "default": false,
           "title": "Bold",
           "type": "boolean"
         },
-        "italic": {
-          "default": false,
-          "title": "Italic",
-          "type": "boolean"
-        },
-        "small_caps": {
-          "default": false,
-          "title": "Small Caps",
-          "type": "boolean"
+        "char_count": {
+          "default": 0,
+          "title": "Char Count",
+          "type": "integer"
         },
         "color": {
           "default": "#000000",
           "title": "Color",
+          "type": "string"
+        },
+        "font": {
+          "title": "Font",
           "type": "string"
         },
         "generic": {
@@ -1286,17 +1599,10 @@
           "title": "Generic",
           "type": "string"
         },
-        "role": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Role"
+        "italic": {
+          "default": false,
+          "title": "Italic",
+          "type": "boolean"
         },
         "level": {
           "anyOf": [
@@ -1310,10 +1616,26 @@
           "default": null,
           "title": "Level"
         },
-        "char_count": {
-          "default": 0,
-          "title": "Char Count",
-          "type": "integer"
+        "role": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role"
+        },
+        "size": {
+          "title": "Size",
+          "type": "number"
+        },
+        "small_caps": {
+          "default": false,
+          "title": "Small Caps",
+          "type": "boolean"
         }
       },
       "required": [
@@ -1326,15 +1648,6 @@
     "Table": {
       "additionalProperties": false,
       "properties": {
-        "id": {
-          "default": "",
-          "title": "Id",
-          "type": "string"
-        },
-        "page": {
-          "title": "Page",
-          "type": "integer"
-        },
         "bbox": {
           "maxItems": 4,
           "minItems": 4,
@@ -1355,6 +1668,65 @@
           "title": "Bbox",
           "type": "array"
         },
+        "caption_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Caption Ref"
+        },
+        "id": {
+          "default": "",
+          "title": "Id",
+          "type": "string"
+        },
+        "n_cols": {
+          "title": "N Cols",
+          "type": "integer"
+        },
+        "page": {
+          "title": "Page",
+          "type": "integer"
+        },
+        "region_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Region Id"
+        },
+        "rows": {
+          "items": {
+            "items": {
+              "$ref": "#/$defs/TableCell"
+            },
+            "type": "array"
+          },
+          "title": "Rows",
+          "type": "array"
+        },
+        "source_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Ref"
+        },
         "style": {
           "anyOf": [
             {
@@ -1372,32 +1744,6 @@
           "default": "table",
           "title": "Type",
           "type": "string"
-        },
-        "rows": {
-          "items": {
-            "items": {
-              "$ref": "#/$defs/TableCell"
-            },
-            "type": "array"
-          },
-          "title": "Rows",
-          "type": "array"
-        },
-        "n_cols": {
-          "title": "N Cols",
-          "type": "integer"
-        },
-        "caption_ref": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Caption Ref"
         }
       },
       "required": [
@@ -1412,28 +1758,6 @@
     "TableCell": {
       "additionalProperties": false,
       "properties": {
-        "runs": {
-          "items": {
-            "$ref": "#/$defs/Run"
-          },
-          "title": "Runs",
-          "type": "array"
-        },
-        "rowspan": {
-          "default": 1,
-          "title": "Rowspan",
-          "type": "integer"
-        },
-        "colspan": {
-          "default": 1,
-          "title": "Colspan",
-          "type": "integer"
-        },
-        "header": {
-          "default": false,
-          "title": "Header",
-          "type": "boolean"
-        },
         "bbox": {
           "anyOf": [
             {
@@ -1461,6 +1785,28 @@
           ],
           "default": null,
           "title": "Bbox"
+        },
+        "colspan": {
+          "default": 1,
+          "title": "Colspan",
+          "type": "integer"
+        },
+        "header": {
+          "default": false,
+          "title": "Header",
+          "type": "boolean"
+        },
+        "rowspan": {
+          "default": 1,
+          "title": "Rowspan",
+          "type": "integer"
+        },
+        "runs": {
+          "items": {
+            "$ref": "#/$defs/Run"
+          },
+          "title": "Runs",
+          "type": "array"
         }
       },
       "required": [
@@ -1472,23 +1818,12 @@
   },
   "additionalProperties": false,
   "properties": {
-    "meta": {
-      "$ref": "#/$defs/Meta"
-    },
-    "styles": {
-      "additionalProperties": {
-        "$ref": "#/$defs/Style"
-      },
-      "default": {},
-      "title": "Styles",
-      "type": "object"
-    },
-    "pages": {
+    "artifacts": {
       "default": [],
       "items": {
-        "$ref": "#/$defs/PageInfo"
+        "$ref": "#/$defs/Artifact"
       },
-      "title": "Pages",
+      "title": "Artifacts",
       "type": "array"
     },
     "body": {
@@ -1599,6 +1934,17 @@
       "title": "Footnotes",
       "type": "array"
     },
+    "meta": {
+      "$ref": "#/$defs/Meta"
+    },
+    "pages": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/PageInfo"
+      },
+      "title": "Pages",
+      "type": "array"
+    },
     "references": {
       "default": [],
       "items": {
@@ -1653,13 +1999,13 @@
       "title": "References",
       "type": "array"
     },
-    "artifacts": {
-      "default": [],
-      "items": {
-        "$ref": "#/$defs/Artifact"
+    "styles": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Style"
       },
-      "title": "Artifacts",
-      "type": "array"
+      "default": {},
+      "title": "Styles",
+      "type": "object"
     }
   },
   "required": [

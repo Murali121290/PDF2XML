@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import re
 from collections.abc import Sequence
 from functools import lru_cache
 from pathlib import Path
@@ -17,6 +19,7 @@ from pdf2xml.extract.types import (
     RawBlock,
     RawCell,
     RawKind,
+    RawRegion,
     StructureLayer,
     StyleLayer,
     rbox,
@@ -31,6 +34,8 @@ _LABELS: dict[str, RawKind] = {
     "paragraph": "paragraph",
     "handwritten_text": "paragraph",
     "list_item": "list_item",
+    "checkbox_unselected": "list_item",
+    "checkbox_selected": "list_item",
     "caption": "caption",
     "footnote": "footnote",
     "table": "table",
@@ -45,11 +50,77 @@ _LABELS: dict[str, RawKind] = {
 }
 
 
+# The models this pipeline runs (OCR, formula and picture models stay off), as
+# ``docling-tools models download layout tableformer`` lays them out in a folder.
+REQUIRED_MODELS = {
+    "layout": "docling-project--docling-layout-heron",
+    "tableformer": "docling-project--docling-models",
+}
+REQUIRED_FILES = {
+    "layout": ("config.json", "preprocessor_config.json", "model.safetensors"),
+    "tableformer": tuple(
+        f"model_artifacts/tableformer/{mode}/{name}"
+        for mode in ("fast", "accurate")
+        for name in ("tm_config.json", f"tableformer_{mode}.safetensors")
+    ),
+}
+DEFAULT_MODELS_DIR = Path(__file__).resolve().parents[3] / "models"
+CACHED_MODELS_DIR = Path.home() / ".cache" / "docling" / "models"
+MODELS_ENV = "PDF2XML_MODELS_DIR"
+
+
+def configure_offline() -> None:
+    """Conversion only reads local models; model downloads belong to the preparation step."""
+    for name in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "HF_DATASETS_OFFLINE",
+                 "HF_HUB_DISABLE_TELEMETRY", "DO_NOT_TRACK"):
+        os.environ[name] = "1"
+
+
+def missing_models(models_dir: Path) -> list[str]:
+    """What a models folder lacks for this pipeline (empty when it is usable)."""
+    if not models_dir.is_dir():
+        return [f"{models_dir} is not a folder"]
+    missing = []
+    for kind, folder in REQUIRED_MODELS.items():
+        if not (models_dir / folder).is_dir():
+            missing.append(f"{kind} model ({folder})")
+            continue
+        for filename in REQUIRED_FILES[kind]:
+            path = models_dir / folder / filename
+            if not path.is_file() or path.stat().st_size == 0:
+                missing.append(f"{kind} model file ({folder}/{filename})")
+    return missing
+
+
+def resolve_models_dir(explicit: Path | None = None) -> Path:
+    """Find complete local models without falling back to a network download."""
+    asked = explicit or (Path(os.environ[MODELS_ENV]) if os.environ.get(MODELS_ENV) else None)
+    if asked is not None:
+        missing = missing_models(asked)
+        if missing:
+            raise ValueError(f"models folder {asked}: missing {', '.join(missing)}; run "
+                             "`python tools/prepare_models.py` before starting the service. "
+                             "Runtime model downloads are disabled.")
+        return asked
+    for candidate in (DEFAULT_MODELS_DIR, CACHED_MODELS_DIR):
+        if not missing_models(candidate):
+            return candidate
+    raise ValueError(
+        "pre-downloaded Docling models not found; run `python tools/prepare_models.py` "
+        f"before starting the service, or set {MODELS_ENV} to a complete local model folder. "
+        "Runtime model downloads are disabled."
+    )
+
+
 class DoclingEngine:
     name = "docling"
 
-    def __init__(self) -> None:
+    def __init__(self, models_dir: Path | None = None) -> None:
+        configure_offline()
         self.last_raw: dict[str, Any] | None = None
+        self.last_confidence: dict[str, Any] | None = None
+        self.table_mode = "accurate"
+        self.models_dir = resolve_models_dir(models_dir)
 
     def analyze(
         self,
@@ -57,19 +128,31 @@ class DoclingEngine:
         style: StyleLayer,
         pages: Sequence[int] | None = None,
         cache: Path | None = None,
+        raw_data: dict[str, Any] | None = None,
+        confidence_data: dict[str, Any] | None = None,
     ) -> StructureLayer:
         from docling_core.types.doc import DoclingDocument
 
-        if cache is not None and cache.exists():
+        if raw_data is not None:
+            raw = raw_data
+            doc = DoclingDocument.model_validate(raw)
+            self.last_confidence = confidence_data
+        elif cache is not None and cache.exists():
             log.info("reusing cached Docling output %s", cache)
             raw = json.loads(cache.read_text(encoding="utf-8"))
             doc = DoclingDocument.model_validate(raw)
+            confidence = cache.with_name("11_structure_confidence.json")
+            self.last_confidence = (json.loads(confidence.read_text(encoding="utf-8"))
+                                    if confidence.exists() else None)
         else:
             doc = self._convert(pdf, pages)
             raw = doc.export_to_dict()
             if cache is not None:
                 cache.parent.mkdir(parents=True, exist_ok=True)
                 cache.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
+                if self.last_confidence is not None:
+                    cache.with_name("11_structure_confidence.json").write_text(
+                        json.dumps(self.last_confidence, indent=2), encoding="utf-8")
         self.last_raw = raw
         layer = from_docling_document(doc, _crop_origins(pdf, doc))
         if pages:
@@ -77,30 +160,71 @@ class DoclingEngine:
             layer.blocks = [b for b in layer.blocks if b.page in keep]
         return layer
 
-    @staticmethod
-    def _convert(pdf: Path, pages: Sequence[int] | None) -> Any:
+    def _convert(self, pdf: Path, pages: Sequence[int] | None) -> Any:
         kwargs: dict[str, Any] = {}
         if pages:
             kwargs["page_range"] = (min(pages), max(pages))
-        result = _converter().convert(str(pdf), **kwargs)
-        return result.document
+        models = str(self.models_dir) if self.models_dir is not None else None
+        result = _converter(models, self.table_mode).convert(str(pdf), **kwargs)
+        try:
+            confidence = result.confidence
+            self.last_confidence = {
+                "mean_grade": confidence.mean_grade.value,
+                "low_grade": confidence.low_grade.value,
+                "pages": {str(n): {"mean_grade": p.mean_grade.value,
+                                    "low_grade": p.low_grade.value}
+                          for n, p in confidence.pages.items()},
+            }
+            return result.document
+        finally:
+            # Models remain cached in the converter; native PDF/parser resources do
+            # not. Explicit release also drains any unconsumed native parser tasks.
+            result.input.release()
 
 
-@lru_cache(maxsize=1)
-def _converter() -> Any:
-    """One converter per process: loading the layout and table models takes ~40 s on CPU."""
-    from docling.datamodel.base_models import InputFormat
-    from docling.datamodel.pipeline_options import PdfPipelineOptions
-    from docling.document_converter import DocumentConverter, PdfFormatOption
+def pipeline_options(models_dir: str | None, table_mode: str = "accurate") -> Any:
+    """Docling's PDF options: no OCR (born-digital only, CLAUDE.md §1), tables on, formula
+    and code enrichment off (Phase 3); models from ``models_dir`` when given."""
+    from docling.datamodel.pipeline_options import PdfPipelineOptions, TableFormerMode
 
     opts = PdfPipelineOptions()
-    opts.do_ocr = False                   # born-digital only (CLAUDE.md §1)
+    opts.do_ocr = False
     opts.do_table_structure = True
-    opts.do_formula_enrichment = False    # Phase 3
+    opts.table_structure_options.mode = TableFormerMode(table_mode)
+    opts.do_formula_enrichment = False
     opts.do_code_enrichment = False
-    return DocumentConverter(
-        format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=opts)}
-    )
+    opts.enable_remote_services = False
+    opts.allow_external_plugins = False
+    opts.use_reading_order_separators = True
+    if models_dir is not None:
+        opts.artifacts_path = models_dir
+    return opts
+
+
+def cache_signature(table_mode: str = "accurate") -> str:
+    """Raw layout depends on library versions and options, not just the PDF hash."""
+    from importlib.metadata import PackageNotFoundError, version
+
+    parts = [f"pdf-options=3:ocr-off,table-on,separators-on,table-mode={table_mode}"]
+    for package in ("docling", "docling-core", "docling-parse"):
+        try:
+            parts.append(f"{package}={version(package)}")
+        except PackageNotFoundError:
+            parts.append(f"{package}=unavailable")
+    return " ".join(parts)
+
+
+@lru_cache(maxsize=2)
+def _converter(models_dir: str | None = None, table_mode: str = "accurate") -> Any:
+    """One converter per process (and models folder): loading the layout and table models
+    takes ~40 s on CPU."""
+    from docling.datamodel.base_models import InputFormat
+    from docling.document_converter import DocumentConverter, PdfFormatOption
+
+    if models_dir is not None:
+        log.info("Docling models from %s", models_dir)
+    return DocumentConverter(format_options={
+        InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options(models_dir, table_mode))})
 
 
 def _crop_origins(pdf: Path, doc: Any) -> dict[int, tuple[float, float]]:
@@ -123,6 +247,7 @@ def _crop_origins(pdf: Path, doc: Any) -> dict[int, tuple[float, float]]:
             is_crop = abs(w - (cr - cl)) < 1 and abs(h - (ct - cb)) < 1
             if is_crop and (abs(cl - ml) > 0.5 or abs(mt - ct) > 0.5):
                 out[n] = (float(cl - ml), float(mt - ct))
+            page.close()
     finally:
         pdoc.close()
     return out
@@ -157,8 +282,68 @@ def from_docling_document(doc: Any, origins: dict[int, tuple[float, float]] | No
     order = 0
     list_groups = (GroupLabel.LIST, GroupLabel.ORDERED_LIST)
 
-    for item, _level in doc.iterate_items(included_content_layers=set(ContentLayer)):
-        if isinstance(item, GroupItem):
+    # Text panels are often classified as pictures. Traverse their children selectively;
+    # diagram labels remain figure text, while editorial panels regain real text blocks.
+    panels: dict[str, str] = {}
+    chapter_pictures: set[str] = set()
+    matter_pictures: set[str] = set()
+    panel_labels: set[str] = set()
+    figure_extensions: dict[tuple[str, int], tuple[float, float, float, float]] = {}
+    for picture in doc.pictures:
+        texts = [getattr(x, "text", "") for x, _ in doc.iterate_items(
+            root=picture, traverse_pictures=True, included_content_layers=set(ContentLayer))]
+        text = " ".join(texts)
+        # Some layouts put the first panel label just above the picture bbox
+        # and under body instead of under the picture. Require corroborating
+        # B/C/D panel labels before extending ownership to an orphan A label.
+        if sum(bool(re.match(r"^[B-D]\s+\w", t)) for t in texts) >= 2:
+            for prov in picture.prov:
+                pg = int(prov.page_no)
+                off = (origins or {}).get(pg, (0, 0))
+                box = _to_top_left(prov.bbox, sizes[pg][1], off)
+                for candidate in doc.texts:
+                    if not re.match(r"^A\s+\w", candidate.text):
+                        continue
+                    for cp in candidate.prov:
+                        if int(cp.page_no) != pg:
+                            continue
+                        label_box = _to_top_left(cp.bbox, sizes[pg][1], off)
+                        if (box[0] - 3 <= label_box[0] and label_box[2] <= box[2] + 3
+                                and 0 <= box[1] - label_box[3] <= 18):
+                            panel_labels.add(candidate.self_ref)
+                            figure_extensions[(picture.self_ref, pg)] = (
+                                box[0], min(box[1], label_box[1]), box[2], box[3])
+        if re.search(r"\bCHAPTER\b", text) and len(text.split()) < 35:
+            chapter_pictures.add(picture.self_ref)
+        elif re.fullmatch(r"\s*(?:GLOSSARY|INDEX|BIBLIOGRAPHY|CONTENTS)\s*", text, re.I):
+            matter_pictures.add(picture.self_ref)
+        elif re.match(r"\s*(?:BOX\s+\d|STOP AND CONSIDER|LEARNING (?:OUTCOMES|OBJECTIVES)|"
+                      r"NOTABLE RESEARCH|KEY (?:POINTS|CONCEPTS)|CLINICAL (?:NOTE|PEARL))",
+                      text, re.I):
+            panels[picture.self_ref] = "exercise" if "CONSIDER" in text else "sidebar"
+            for prov in picture.prov:
+                pg = int(prov.page_no)
+                box = _to_top_left(prov.bbox, sizes.get(pg, (0, 0))[1],
+                                   (origins or {}).get(pg, (0, 0)))
+                layer.regions.append(RawRegion(picture.self_ref, pg, box,
+                                               panels[picture.self_ref]))
+
+    for item, _level in doc.iterate_items(traverse_pictures=True,
+                                         included_content_layers=set(ContentLayer)):
+        if isinstance(item, GroupItem) or item.self_ref in panel_labels:
+            continue
+        ancestor = item.parent.resolve(doc) if item.parent else None
+        picture_ref = None
+        while ancestor is not None:
+            if getattr(ancestor, "label", None) == "picture":
+                picture_ref = ancestor.self_ref
+                break
+            ancestor = ancestor.parent.resolve(doc) if ancestor.parent else None
+        if (picture_ref and picture_ref not in panels and picture_ref not in chapter_pictures
+                and picture_ref not in matter_pictures
+                and getattr(item, "label", None) != "caption"):
+            continue
+        if item.self_ref in panels or item.self_ref in matter_pictures:
             continue
         label = getattr(item.label, "value", str(item.label))
         kind = _LABELS.get(label, "other")
@@ -187,7 +372,8 @@ def from_docling_document(doc: Any, origins: dict[int, tuple[float, float]] | No
             off = (origins or {}).get(page_no, (0.0, 0.0))
             block = RawBlock(
                 page=page_no,
-                bbox=_to_top_left(prov.bbox, page_h, off),
+                bbox=figure_extensions.get((item.self_ref, page_no),
+                                           _to_top_left(prov.bbox, page_h, off)),
                 kind=kind,
                 order=order,
                 text=text,
@@ -196,6 +382,9 @@ def from_docling_document(doc: Any, origins: dict[int, tuple[float, float]] | No
                 ordered=ordered,
                 marker=marker,
                 depth=depth,
+                source_ref=item.self_ref,
+                region_id=picture_ref if picture_ref in panels else None,
+                role="chapter-art" if item.self_ref in chapter_pictures else None,
             )
             order += 1
             if isinstance(item, TableItem):
@@ -216,5 +405,7 @@ def from_docling_document(doc: Any, origins: dict[int, tuple[float, float]] | No
                     )
             if kind == "formula" and text and "\\" in text:
                 block.latex = text
+            if block.region_id and kind == "list_item":
+                block.group = f"{block.region_id}:{'ordered' if ordered else 'bullets'}"
             layer.blocks.append(block)
     return layer

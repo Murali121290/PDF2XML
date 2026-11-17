@@ -6,28 +6,40 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-Target = Literal["json", "xml", "epub", "docx", "bits", "jats"]
-ALL_TARGETS: list[Target] = ["json", "xml", "epub", "docx", "bits", "jats"]
+Target = Literal["json", "xml", "epub", "docx", "bits", "jats", "content"]
+ALL_TARGETS: list[Target] = ["json", "xml", "epub", "docx", "bits", "jats", "content"]
 
 
 class Config(BaseModel):
-    engine: Literal["auto", "docling", "heuristic"] = "auto"
+    engine: Literal["auto", "docling", "heuristic"] = "docling"
+    table_mode: Literal["accurate", "fast"] = "accurate"
     style_backend: Literal["pdfplumber", "pymupdf"] = os.environ.get(  # type: ignore[assignment]
         "PDF2XML_STYLE_BACKEND", "pdfplumber"
     )
-    targets: list[Target] = list(ALL_TARGETS)
+    targets: list[Target] = ["json", "xml"]
     profile: Path | None = None             # BITS/JATS export profile (YAML/JSON)
     metadata: Path | None = None            # book/journal/chapter metadata (YAML/JSON)
     pages: list[int] | None = None          # 1-based page numbers; None = all
     epub_layout: Literal["reflow", "fixed"] = "reflow"
-    overlays: bool = True
+    overlays: bool = False
+    completeness: bool = True               # qa/completeness.json: what the output may lack
     dehyphenate: bool = True
     image_scale: float = 2.0                # render scale for figure crops / overlays
     assign_threshold: float = 0.5           # min share of a word's area inside a block
     lang: str = "en"
     reuse_cache: bool = True                # reuse 11_structure_raw.json if the PDF is unchanged
+    cache_dir: Path | None = None
+    cache_scope: str = "local"
+    debug_artifacts: bool = False
+    max_pages: int = Field(default=1000, ge=1)
+    # Pre-downloaded models; otherwise PDF2XML_MODELS_DIR, project models/, or local cache.
+    # Missing files are an error: preparation is separate from conversion.
+    models_dir: Path | None = None
+    # a GROBID server (http://localhost:8070) that reads references and article headers;
+    # None: $PDF2XML_GROBID_URL, else no GROBID
+    grobid_url: str | None = os.environ.get("PDF2XML_GROBID_URL") or None
 
 
 def parse_pages(spec: str | None) -> list[int] | None:
@@ -39,6 +51,8 @@ def parse_pages(spec: str | None) -> list[int] | None:
         part = part.strip()
         if "-" in part:
             a, b = part.split("-", 1)
+            if int(b) - int(a) > 10000:
+                raise ValueError("page range is too large")
             out.extend(range(int(a), int(b) + 1))
         elif part:
             out.append(int(part))

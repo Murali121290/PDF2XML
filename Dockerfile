@@ -1,37 +1,22 @@
-# Use Python 3.12 to ensure maximum compatibility with pre-compiled wheels (like saxonche, docling)
-FROM python:3.12-slim
-
-# Prevent Python from writing pyc files to disc and buffering stdout/stderr
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-
+# Runtime-only application: model weights are supplied in this folder.
+FROM python:3.11-slim
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PDF2XML_DATA=/app/out
 WORKDIR /app
-
-# Install necessary system packages (optional depending on docling/pdfplumber C dependencies)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libgl1 \
-    libglib2.0-0 \
-    libxcb1 \
-    libxcb-cursor0 \
-    libxrender1 \
-    libxext6 \
+    libgl1 libglib2.0-0 libxcb1 libxcb-cursor0 libxrender1 libxext6 \
     && rm -rf /var/lib/apt/lists/*
-
-# Copy the entire project into the container
-COPY . .
-
-# First install CPU-only PyTorch to skip downloading gigabytes of useless NVIDIA CUDA binaries
-RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
-
-# Install the Python package and all dependencies (with increased timeout)
-RUN pip install --default-timeout=1000 --no-cache-dir -e ".[ml]"
-
-# Create an output directory for the API to use temporarily
-RUN mkdir -p out
-
-# Expose the port the app runs on
+COPY requirements.lock.txt ./
+RUN pip install --no-cache-dir --no-deps -c requirements.lock.txt torch torchvision --index-url https://download.pytorch.org/whl/cpu
+COPY pyproject.toml requirements.txt api.py run.py ./
+COPY src ./src
+RUN pip install --default-timeout=1000 --no-cache-dir -r requirements.txt
+COPY models ./models
+COPY tools ./tools
+RUN python tools/prepare_models.py --check
+ENV PDF2XML_MODELS_DIR=/app/models HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+    HF_DATASETS_OFFLINE=1 HF_HUB_DISABLE_TELEMETRY=1 DO_NOT_TRACK=1
+RUN useradd --create-home --uid 10001 appuser && mkdir -p /app/out && chown appuser:appuser /app/out
+USER appuser
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8087/health/ready', timeout=3)"
 EXPOSE 8087
-
-# Command to run the application
-CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8087"]
+CMD ["python", "run.py", "api", "--host", "0.0.0.0", "--port", "8087"]

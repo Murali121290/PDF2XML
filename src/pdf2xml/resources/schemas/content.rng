@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<grammar xmlns="http://relaxng.org/ns/structure/1.0">
+  <start>
+    <element name="content">
+      <attribute name="version"/><attribute name="lang"/>
+      <element name="body">
+        <zeroOrMore>
+          <choice>
+            <element name="title"><ref name="inline"/></element>
+            <element name="p"><ref name="inline"/></element>
+            <element name="table">
+              <attribute name="cols"/>
+              <zeroOrMore>
+                <element name="tr">
+                  <zeroOrMore>
+                    <element>
+                      <choice><name>th</name><name>td</name></choice>
+                      <optional><attribute name="rowspan"/></optional>
+                      <optional><attribute name="colspan"/></optional>
+                      <ref name="inline"/>
+                    </element>
+                  </zeroOrMore>
+                </element>
+              </zeroOrMore>
+            </element>
+          </choice>
+        </zeroOrMore>
+      </element>
+    </element>
+  </start>
+  <define name="inline">
+    <zeroOrMore>
+      <choice>
+        <text/>
+        <element>
+          <choice>
+            <name>bold</name><name>italic</name><name>underline</name><name>strike</name>
+            <name>sc</name><name>monospace</name><name>sup</name><name>sub</name>
+          </choice>
+          <ref name="inline"/>
+        </element>
+        <element name="ext-link"><attribute name="href"/><ref name="inline"/></element>
+        <element name="inline-graphic">
+          <attribute name="src"/><optional><attribute name="alt"/></optional>
+        </element>
+      </choice>
+    </zeroOrMore>
+  </define>
+</grammar>

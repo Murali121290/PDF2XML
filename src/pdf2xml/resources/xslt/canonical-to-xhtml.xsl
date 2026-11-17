@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Canonical XML → XHTML 5 (EPUB 3 content document).
      Block styles become CSS classes (generated from <styles> by export/css.py);
-     paragraph geometry and run differences become inline CSS in em units. -->
+     paragraph geometry and run differences become inline CSS in em units.
+     Optional meta/outline and source-ref/region-id evidence stay in canonical XML;
+     they are not visible book content. Heading @level controls the rendered hierarchy. -->
 <xsl:stylesheet version="3.0"
     xmlns:xsl="http://www.w3.org/1999/XSL/Transform"
     xmlns:xs="http://www.w3.org/2001/XMLSchema"
@@ -112,7 +114,10 @@
     <div>
       <xsl:call-template name="block-attrs"/>
       <xsl:attribute name="class" select="string-join(('formula', @style), ' ')"/>
-      <xsl:apply-templates select="text/node()"/>
+      <xsl:choose>
+        <xsl:when test="@src"><img src="{@src}" alt="Equation from source PDF"/></xsl:when>
+        <xsl:otherwise><xsl:apply-templates select="text/node()"/></xsl:otherwise>
+      </xsl:choose>
     </div>
   </xsl:template>
 

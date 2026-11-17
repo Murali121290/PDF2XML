@@ -24,6 +24,35 @@ MetaOpt = Annotated[Path | None, typer.Option(
     "--meta", exists=True, dir_okay=False, help="Book/journal/chapter metadata (YAML/JSON)")]
 
 
+ModelsOpt = Annotated[Path | None, typer.Option(
+    "--models-dir", file_okay=False,
+    help="Local Docling models, prepared with `python tools/prepare_models.py`. Default: "
+         "$PDF2XML_MODELS_DIR, project models/, then ~/.cache/docling/models. "
+         "Conversion never downloads missing models")]
+
+
+GrobidOpt = Annotated[str | None, typer.Option(
+    "--grobid", envvar="PDF2XML_GROBID_URL", metavar="URL",
+    help="A GROBID server, e.g. http://localhost:8070: reads the references the built-in "
+         "reader cannot, and an article's authors with affiliations. Answers are kept in "
+         "12_grobid.json; without a server the output is unchanged")]
+
+
+def _models_dir(value: Path | None, engine: str = "docling") -> Path | None:
+    """The models folder to use, checked now rather than after the slow model load."""
+    from pdf2xml.extract.structure_docling import resolve_models_dir
+
+    if value is None:
+        from pdf2xml.extract.base import docling_available
+
+        if engine == "heuristic" or (engine == "auto" and not docling_available()):
+            return None
+    try:
+        return resolve_models_dir(value)
+    except ValueError as e:
+        raise typer.BadParameter(str(e)) from None
+
+
 def _setup_logging(verbose: bool) -> None:
     logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO,
                         format="%(levelname)s %(name)s: %(message)s")
@@ -47,20 +76,38 @@ def _print_exports(exports: dict[str, ExportResult]) -> None:
                     fg=None if r.valid else typer.colors.RED)
 
 
+def _print_completeness(out_dir: Path) -> None:
+    path = out_dir / "qa" / "completeness.json"
+    if not path.exists():
+        return
+    data = json.loads(path.read_text(encoding="utf-8"))
+    colors = {"warn": typer.colors.YELLOW, "error": typer.colors.RED}
+    typer.echo(f"  completeness: {data['status']}  ({path.relative_to(out_dir).as_posix()})")
+    for name, c in data["checks"].items():
+        if c["status"] != "ok":
+            typer.secho(f"    {name}: {c['status']}: {c['summary']}", fg=colors.get(c["status"]))
+
+
 @app.command()
 def convert(
     pdfs: Annotated[list[Path], typer.Argument(exists=True, dir_okay=False, help="PDF file(s)")],
     out: Annotated[Path, typer.Option("--out", "-o", help="Output root directory")] = Path("out"),
-    to: Annotated[str, typer.Option(help="Comma list: json,xml,epub,docx,bits,jats")] = (
-        "json,xml,epub,docx,bits,jats"),
+    to: Annotated[str, typer.Option(help="Comma list: json,xml,epub,docx,bits,jats,content")] = (
+        "json,xml"),
     profile: ProfileOpt = None,
     meta: MetaOpt = None,
-    engine: Annotated[str, typer.Option(help="auto | docling | heuristic")] = "auto",
+    engine: Annotated[str, typer.Option(help="auto | docling | heuristic")] = "docling",
+    table_mode: Annotated[str, typer.Option(help="Table structure model: accurate | fast")] = "accurate",
     style_backend: Annotated[str, typer.Option(help="pdfplumber | pymupdf")] = "pdfplumber",
     pages: Annotated[str | None, typer.Option(help='Page selection, e.g. "1-3,7"')] = None,
     epub_layout: Annotated[str, typer.Option(help="reflow | fixed")] = "reflow",
-    overlays: Annotated[bool, typer.Option(help="Write QA overlay PNGs")] = True,
+    overlays: Annotated[bool, typer.Option(help="Write QA overlay PNGs")] = False,
+    debug_artifacts: Annotated[bool, typer.Option(help="Write intermediate extraction JSON for debugging")] = False,
+    completeness: Annotated[bool, typer.Option(
+        help="Check what the output may lack (qa/completeness.json)")] = True,
     no_cache: Annotated[bool, typer.Option("--no-cache", help="Re-run Docling")] = False,
+    models_dir: ModelsOpt = None,
+    grobid: GrobidOpt = None,
     verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
 ) -> None:
     """Convert PDF(s) to canonical JSON/XML, EPUB, DOCX, BITS and JATS."""
@@ -69,7 +116,10 @@ def convert(
 
     _setup_logging(verbose)
     cfg = Config(
+        models_dir=_models_dir(models_dir, engine),
+        grobid_url=grobid,
         engine=engine,  # type: ignore[arg-type]
+        table_mode=table_mode,  # type: ignore[arg-type]
         style_backend=style_backend,  # type: ignore[arg-type]
         targets=_targets(to),  # type: ignore[arg-type]
         profile=profile,
@@ -77,9 +127,13 @@ def convert(
         pages=parse_pages(pages),
         epub_layout=epub_layout,  # type: ignore[arg-type]
         overlays=overlays,
+        completeness=completeness,
         reuse_cache=not no_cache,
+        cache_dir=out / "_cache",
+        debug_artifacts=debug_artifacts,
     )
     failed = 0
+    reviews = 0
     for pdf in pdfs:
         try:
             res = run(pdf, out, cfg)
@@ -89,26 +143,34 @@ def convert(
             continue
         cov = res.coverage
         status = "ok" if cov.ok and not res.xml_errors else "check report.json"
+        if res.quality.get("status") == "needs_review":
+            status = "needs_review: see quality.json"
+            reviews += 1
         typer.secho(f"✓ {pdf.name} → {res.out_dir}  ({status})",
                     fg=typer.colors.GREEN if status == "ok" else typer.colors.YELLOW)
         typer.echo(f"  blocks={len(res.document.body)} styles={len(res.document.styles)} "
                    f"coverage={cov.ratio:.4f} xml_valid={not res.xml_errors} "
                    f"engine={res.document.meta.engine}")
         _print_exports(res.exports)
+        _print_completeness(res.out_dir)
+        for issue in res.quality.get("issues", [])[:8]:
+            page = f" page {issue['page']}" if "page" in issue else ""
+            typer.echo(f"  ! {issue['code']}{page}: {issue['message']}")
         for w in res.document.meta.warnings[:10]:
             typer.echo(f"  ! {w}")
-    raise typer.Exit(code=1 if failed else 0)
+    raise typer.Exit(code=1 if failed else 3 if reviews else 0)
 
 
 @app.command()
 def export(
     source: Annotated[Path, typer.Argument(
         exists=True, help="A conversion folder (out/<name>) or its 20_canonical.json")],
-    to: Annotated[str, typer.Option(help="Comma list: bits,jats")] = "bits,jats",
+    to: Annotated[str, typer.Option(help="Comma list: bits,jats,content")] = "bits,jats",
     profile: ProfileOpt = None,
     meta: MetaOpt = None,
+    grobid: GrobidOpt = None,
 ) -> None:
-    """Re-export BITS/JATS from an earlier conversion, e.g. with another profile or metadata."""
+    """Re-export BITS/JATS or Content XML from an earlier canonical conversion."""
     import json as _json
 
     from pdf2xml.model import Document
@@ -120,30 +182,46 @@ def export(
         raise typer.BadParameter(f"{path} not found; run `pdf2xml convert` first")
     doc = Document.model_validate_json(path.read_text(encoding="utf-8"))
     targets = _targets(to)
-    if not set(targets) <= {"bits", "jats"}:
-        raise typer.BadParameter("export writes bits and/or jats only")
-    cfg = Config(targets=targets, profile=profile, metadata=meta)  # type: ignore[arg-type]
+    if not set(targets) <= {"bits", "jats", "content"}:
+        raise typer.BadParameter("export writes bits, jats and/or content only")
+    cfg = Config(targets=targets, profile=profile, metadata=meta,  # type: ignore[arg-type]
+                 grobid_url=grobid)
     exports = publish(doc, path.parent, cfg)
     _print_exports(exports)
+    content_summary = None
+    content_errors: list[str] = []
+    if "content" in targets:
+        from pdf2xml.xml.content import write_content
+
+        content_path, content_errors = write_content(doc, path.parent)
+        content_summary = {"file": content_path.name, "schema": "content (RelaxNG)",
+                           "valid": not content_errors, "errors": content_errors}
+        typer.echo(f"  content: {content_path.name} "
+                   f"[content (RelaxNG)] {'INVALID' if content_errors else 'valid'}")
     report = path.parent / "report.json"
     if report.exists():
         data = _json.loads(report.read_text(encoding="utf-8"))
         data.setdefault("exports", {}).update(export_summary(exports))
+        if content_summary is not None:
+            data["content_xml"] = content_summary
         report.write_text(_json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True),
                           encoding="utf-8")
-    raise typer.Exit(code=0 if all(r.valid for r in exports.values()) else 1)
+    from pdf2xml.qa.report import refresh_exports
+    refresh_exports(path.parent, doc, exports, content_errors if "content" in targets else None)
+    raise typer.Exit(code=0 if not content_errors and all(r.valid for r in exports.values()) else 1)
 
 
 @app.command()
 def validate(
     files: Annotated[list[Path], typer.Argument(exists=True, dir_okay=False, help="XML file(s)")],
     schema: Annotated[str | None, typer.Option(
-        help="bits | jats-archiving | jats-publishing | jats-authoring (default: detect)")] = None,
+        help="bits | jats-archiving | jats-publishing | jats-authoring | content "
+             "(default: detect)")] = None,
 ) -> None:
-    """Validate BITS/JATS files against the bundled NLM DTDs (offline)."""
+    """Validate BITS/JATS (NLM DTD) or Content XML (RelaxNG), offline."""
     from pdf2xml.publishing.schemas import SCHEMAS, validate_file
 
-    if schema and schema not in SCHEMAS:
+    if schema and schema not in {*SCHEMAS, "content"}:
         raise typer.BadParameter(f"unknown schema {schema}; choose from {', '.join(SCHEMAS)}")
     bad = 0
     for f in files:
@@ -162,15 +240,16 @@ def validate(
 def inspect(
     pdf: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
     out: Annotated[Path, typer.Option("--out", "-o")] = Path("out"),
-    engine: Annotated[str, typer.Option()] = "auto",
+    engine: Annotated[str, typer.Option()] = "docling",
     pages: Annotated[str | None, typer.Option()] = None,
+    models_dir: ModelsOpt = None,
 ) -> None:
     """Triage + overlays only: see what the pipeline detects, without exporting."""
     from pdf2xml.pipeline import convert as run
 
     _setup_logging(False)
     cfg = Config(engine=engine, targets=["json"], pages=parse_pages(pages),  # type: ignore[arg-type]
-                 overlays=True)
+                 overlays=True, models_dir=_models_dir(models_dir, engine))
     res = run(pdf, out, cfg)
     typer.echo(json.dumps(res.triage.model_dump(), indent=2))
     typer.echo(f"overlays: {res.out_dir / 'qa'}")
@@ -189,26 +268,54 @@ def serve(
     no_browser: Annotated[bool, typer.Option("--no-browser", help="Don't open a browser")] = False,
     convert: Annotated[bool, typer.Option(
         help="Accept PDF uploads and convert them (POST /api/convert, page /upload)")] = True,
-    engine: Annotated[str, typer.Option(
-        help="Default engine for uploads: docling | heuristic | auto")] = "docling",
+    engine: Annotated[str | None, typer.Option(
+        help="Default engine for uploads: docling | heuristic | auto. Default: docling "
+             "when it is installed, else auto (heuristic)")] = None,
     max_upload_mb: Annotated[int, typer.Option(help="Largest PDF accepted, in MB")] = 300,
     cors_origin: Annotated[list[str] | None, typer.Option(
         "--cors-origin", help="Origin of a frontend served elsewhere that may call the API, "
                               "e.g. http://localhost:5173; repeatable")] = None,
+    models_dir: ModelsOpt = None,
+    grobid: GrobidOpt = None,
+    allowed_host: Annotated[list[str] | None, typer.Option(
+        "--allowed-host", help="Another name requests may use in their Host header (a domain, "
+                               "a container's service name); repeatable. '*' accepts any "
+                               "name, for a server behind a reverse proxy")] = None,
+    api_only: Annotated[bool, typer.Option(
+        "--api-only", help="Serve only the API (convert, jobs, downloads, report, "
+                           "validate): no viewer pages or XSLT rendering")] = False,
+    pdf_root: Annotated[list[Path] | None, typer.Option(
+        '--pdf-root', exists=True, file_okay=False,
+        help='Folder containing original PDFs for layout inspection; repeatable')] = None,
+    layout: Annotated[bool, typer.Option(help='Open the PDF/XML layout inspector')] = False,
 ) -> None:
     """Live preview: render BITS/JATS/canonical XML through XSLT, validate and check it; and
     convert PDFs uploaded from a web page.
 
     The page reloads when the XML, the stylesheet or a CSS file next to it changes.
     """
+    from pdf2xml.extract.base import docling_available
     from pdf2xml.jobs import ENGINES
     from pdf2xml.preview import serve as run
 
-    if engine not in ENGINES:
+    if engine is None:
+        engine = "docling" if docling_available() else "auto"
+        if engine == "auto" and convert:
+            typer.echo("Docling is not installed (uv sync --extra ml): uploads use the "
+                       "heuristic engine", err=True)
+    elif engine not in ENGINES:
         raise typer.BadParameter(f"engine must be one of {', '.join(ENGINES)}")
+    elif engine == "docling" and convert and not docling_available():
+        raise typer.BadParameter("Docling is not installed (uv sync --extra ml); "
+                                 "use --engine heuristic or auto")
+    models = _models_dir(models_dir, engine) if convert else None
+    if models is not None:
+        typer.echo(f"  Docling models: {models}", err=True)
     run(root, host=host, port=port, sheets=list(xslt or []), open_browser=not no_browser,
         convert=convert, engine=engine, max_upload_mb=max_upload_mb,
-        cors=list(cors_origin or []))
+        cors=list(cors_origin or []), models_dir=models, grobid_url=grobid,
+        source_roots=list(pdf_root or []), layout=layout,
+        allowed_hosts=list(allowed_host or []), api_only=api_only)
 
 
 @app.command()

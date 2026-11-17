@@ -12,16 +12,22 @@ the XSLT, one transform at a time.
 
 from __future__ import annotations
 
+import contextlib
+import hashlib
+import io
+import ipaddress
 import json
 import mimetypes
 import multiprocessing
 import re
 import threading
 import webbrowser
-from collections.abc import Sequence
+from collections import OrderedDict
+from collections.abc import Iterator, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass, field
+from email.message import Message
 from email.parser import BytesParser
 from email.policy import default as email_policy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -49,6 +55,27 @@ def _transform(text: str, sheet: str, params: dict[str, str], stamp: str) -> str
     return transform_file(text, Path(sheet), params, stamp)
 
 
+def _pdf_frame(path: str, number: int) -> tuple[bytes, dict[str, Any]]:
+    """Native rendering stays on the existing single-process worker."""
+    import pypdfium2 as pdfium
+
+    from pdf2xml.export.assets import page_origin
+
+    with pdfium.PdfDocument(path) as pdf:
+        if not 1 <= number <= len(pdf):
+            raise ValueError('PDF page is outside the source document')
+        page = pdf[number - 1]
+        try:
+            origin = page_origin(page)
+            geometry = {'width': page.get_width(), 'height': page.get_height(),
+                        'origin': list(origin)}
+            data = io.BytesIO()
+            page.render(scale=1.7).to_pil().convert('RGB').save(data, format='PNG')
+            return data.getvalue(), geometry
+        finally:
+            page.close()
+
+
 class _XsltWorker:
     """Runs every XSLT transform in one child process.
 
@@ -57,22 +84,45 @@ class _XsltWorker:
     its compiled stylesheets between requests).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, timeout: float = 300) -> None:
         self._pool: ProcessPoolExecutor | None = None
         self._lock = threading.Lock()
+        self.timeout = timeout
 
     def run(self, text: str, sheet: Path, params: dict[str, str], stamp: str) -> str:
+        result: str = self.call(_transform, text, str(sheet), params, stamp)
+        return result
+
+    def call(self, fn: Any, *args: Any) -> Any:
+        """``fn(*args)`` in the worker process (``fn`` must be picklable)."""
         with self._lock:
             if self._pool is None:
                 self._pool = ProcessPoolExecutor(
                     max_workers=1, mp_context=multiprocessing.get_context("spawn"))
-            fut = self._pool.submit(_transform, text, str(sheet), params, stamp)
+            pool = self._pool
+            fut = pool.submit(fn, *args)
         try:
-            return fut.result(timeout=300)
+            return fut.result(timeout=self.timeout)
+        except TimeoutError as e:               # a runaway transform would block every later one
+            self._reset(pool)
+            raise RuntimeError(f"the XSLT transform took longer than {self.timeout:g} s "
+                               "and was stopped") from e
         except BrokenProcessPool as e:          # the worker died: start a new one next time
-            with self._lock:
-                self._pool = None
+            self._reset(pool)
             raise RuntimeError(f"XSLT worker stopped: {e}") from e
+
+    def _reset(self, pool: ProcessPoolExecutor) -> None:
+        """Stop ``pool``'s worker; the next call starts a new one. Only the pool that failed
+        is dropped: another thread may already have replaced it."""
+        with self._lock:
+            if self._pool is pool:
+                self._pool = None
+        # the executor has no public way to stop a busy worker
+        procs: dict[int, Any] = getattr(pool, "_processes", None) or {}
+        for proc in list(procs.values()):
+            with contextlib.suppress(OSError, ValueError):
+                proc.kill()
+        pool.shutdown(wait=False, cancel_futures=True)
 
     def close(self) -> None:
         with self._lock:
@@ -102,6 +152,8 @@ def _builtin_sheets() -> list[Sheet]:
         Sheet("canonical", "Canonical → XHTML (EPUB sheet)",
               RESOURCES / "xslt" / "canonical-to-xhtml.xsl", UI_DIR, True,
               {"css": "canonical.css"}),
+        Sheet("content", "Content XML → HTML", RESOURCES / "xslt" / "content-preview.xsl",
+              UI_DIR, True),
     ]
 
 
@@ -121,7 +173,8 @@ def _custom_sheets(paths: list[Path]) -> list[Sheet]:
 class Viewer:
     """Everything the web UI asks for, independent of HTTP (so it can be tested directly)."""
 
-    def __init__(self, root: Path, sheets: list[Path] | None = None) -> None:
+    def __init__(self, root: Path, sheets: list[Path] | None = None,
+                 source_roots: Sequence[Path] = ()) -> None:
         self.root = root.resolve()
         extra = list(sheets or [])
         if (self.root / "_xslt").is_dir():
@@ -129,6 +182,11 @@ class Viewer:
         self.sheets = {s.id: s for s in _builtin_sheets() + _custom_sheets(extra)}
         self._cache: dict[tuple[str, str], tuple[int, Any]] = {}
         self._xslt = _XsltWorker()
+        self.source_roots = (self.root, *(p.resolve() for p in source_roots))
+        self._source_hashes: dict[tuple[str, int, int], str] = {}
+        self._frames: OrderedDict[tuple[str, int, int, int],
+                                  tuple[bytes, dict[str, Any]]] = OrderedDict()
+        self._frame_lock = threading.RLock()
 
     def close(self) -> None:
         self._xslt.close()
@@ -189,7 +247,7 @@ class Viewer:
         xml = self.xml_path(doc, file)
         s = self.sheet(sheet_id)
         root = etree.parse(str(xml), _PARSER).getroot()
-        if s.id == "proof":
+        if s.id in {"proof", "content"}:
             # line numbers let the page link each element back to the source
             for el in root.iter(etree.Element):
                 if el.sourceline is not None:
@@ -220,6 +278,108 @@ class Viewer:
     def source(self, doc: str, file: str) -> str:
         return self.xml_path(doc, file).read_text(encoding="utf-8", errors="replace")
 
+    def canonical_document(self, doc: str) -> Any:
+        from pdf2xml.model import Document
+
+        def load(d: Path) -> Document:
+            path = d / '20_canonical.json'
+            if not path.is_file():
+                raise NotFound('Canonical JSON is required for layout inspection')
+            return Document.model_validate_json(path.read_text(encoding='utf-8'))
+
+        return self._cached(doc, 'inspection-document', load)
+
+    def inspection_stamp(self, doc: str, file: str) -> str:
+        directory = self.doc_dir(doc)
+        paths = [self.xml_path(doc, file), *(directory / name for name in
+                 ['20_canonical.json', 'report.json', 'source.json'])]
+        return '-'.join(str(p.stat().st_mtime_ns) if p.exists() else '0' for p in paths)
+
+    def source_pdf(self, doc: str) -> Path | None:
+        document = self.canonical_document(doc)
+        directory = self.doc_dir(doc)
+        candidates = [directory / 'source.pdf']
+        manifest = directory / 'source.json'
+        if manifest.is_file():
+            data = json.loads(manifest.read_text(encoding='utf-8'))
+            if data.get('path'):
+                candidates.insert(0, Path(data['path']))
+        name = Path(document.meta.source).name
+        if name == document.meta.source and name.lower().endswith('.pdf'):
+            candidates.extend(base / name for base in self.source_roots)
+        for candidate in candidates:
+            path = candidate.resolve()
+            if (path.suffix.lower() != '.pdf' or not path.is_file()
+                    or not any(path.is_relative_to(base) for base in self.source_roots)):
+                continue
+            stat = path.stat()
+            key = (str(path), stat.st_mtime_ns, stat.st_size)
+            digest = self._source_hashes.get(key)
+            if digest is None:
+                with path.open('rb') as stream:
+                    digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+                self._source_hashes[key] = digest
+            if digest == document.meta.sha256:
+                return path
+        return None
+
+    def bind_source(self, doc: str, data: bytes) -> None:
+        expected = self.canonical_document(doc).meta.sha256
+        digest = hashlib.sha256(data).hexdigest()
+        if b'%PDF-' not in data[:1024] or digest != expected:
+            raise ValueError('This PDF does not match the source used for this conversion')
+        directory = self.doc_dir(doc)
+        target = (directory / 'qa' / f'source-{digest[:16]}.pdf').resolve()
+        if not target.is_relative_to(directory):
+            raise ValueError('Source storage is outside the conversion folder')
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not target.is_file():
+            target.write_bytes(data)
+        manifest = (directory / 'source.json').resolve()
+        if manifest.parent != directory:
+            raise ValueError('Source manifest is outside the conversion folder')
+        manifest.write_text(json.dumps(
+            {'path': str(target), 'sha256': digest}, indent=2), encoding='utf-8')
+
+    def page_frame(self, doc: str, number: int) -> tuple[bytes, dict[str, Any]]:
+        path = self.source_pdf(doc)
+        if path is None:
+            raise NotFound('Attach the original PDF to inspect its pages')
+        stat = path.stat()
+        key = (str(path), stat.st_mtime_ns, stat.st_size, number)
+        with self._frame_lock:
+            if key not in self._frames:
+                self._frames[key] = self._xslt.call(_pdf_frame, str(path), number)
+                while len(self._frames) > 4:
+                    self._frames.popitem(last=False)
+            self._frames.move_to_end(key)
+            return self._frames[key]
+
+    def inspection(self, doc: str, file: str, number: int) -> dict[str, Any]:
+        from pdf2xml.qa.inspection import page_blocks
+
+        document = self.canonical_document(doc)
+        pages = [p.n for p in document.pages] or list(range(1, document.meta.pages + 1))
+        if number == 0:
+            number = pages[0]
+        if number not in pages:
+            raise ValueError('Choose a page included in this conversion')
+        source = self.source(doc, file)
+        data = page_blocks(document, number, source, file == '30_canonical.xml')
+        page = next((p for p in document.pages if p.n == number), None)
+        geometry = {'width': page.width if page else 600,
+                    'height': page.height if page else 800, 'origin': [0, 0]}
+        available = self.source_pdf(doc) is not None
+        if available:
+            _, geometry = self.page_frame(doc, number)
+        report = self.report(doc)
+        return {**data, 'page': {'number': number, **geometry}, 'pages': pages,
+                'source_available': available, 'source_verified': available,
+                'stamp': self.inspection_stamp(doc, file),
+                'quality': {key: report.get('quality', {}).get(key) for key in ('status', 'errors', 'warnings', 'issue_count')},
+                'issues': [i for i in report.get('quality', {}).get('issues', [])
+                           if i.get('page') == number]}
+
     def validate(self, doc: str, file: str) -> dict[str, Any]:
         xml = self.xml_path(doc, file)
         try:
@@ -234,7 +394,7 @@ class Viewer:
         else:
             from pdf2xml.publishing.schemas import detect, validate
             schema = detect(tree.getroot(), tree.docinfo.public_id)
-            errors = validate(tree.getroot(), schema, limit=500)
+            errors = validate(tree.getroot(), schema)
         out = []
         for err in errors:
             m = re.match(r"line (\d+): (.*)", err, re.S)
@@ -245,6 +405,9 @@ class Viewer:
     def report(self, doc: str) -> dict[str, Any]:
         p = self.doc_dir(doc) / "report.json"
         if not p.exists():
+            quality = self.doc_dir(doc) / "quality.json"
+            if quality.is_file():
+                return {"quality": json.loads(quality.read_text(encoding="utf-8"))}
             return {}
         data: dict[str, Any] = json.loads(p.read_text(encoding="utf-8"))
         return data
@@ -311,26 +474,50 @@ def _error_page(message: str) -> str:
 
 # ---------------------------------------------------------------- HTTP
 
+def _form_parts(ctype: str, body: bytes) -> Iterator[tuple[Message, memoryview]]:
+    """The parts of a ``multipart/form-data`` body: headers, and the content as a view into
+    ``body``. Nothing is copied, so a 300 MB upload costs 300 MB, not several times that
+    (the ``email`` parser decodes the whole body to text and copies it again)."""
+    head = Message()
+    head["Content-Type"] = ctype
+    boundary = head.get_param("boundary")
+    if not isinstance(boundary, str) or not boundary:
+        raise JobError(400, "bad_form", "the multipart form has no boundary")
+    delim = b"--" + boundary.encode("latin-1")
+    view = memoryview(body)
+    pos = body.find(delim)
+    if pos < 0:
+        raise JobError(400, "bad_form", "the multipart form is empty")
+    pos += len(delim)
+    while not body.startswith(b"--", pos):          # "--boundary--" closes the form
+        if not body.startswith(b"\r\n", pos):
+            raise JobError(400, "bad_form", "the multipart form is malformed")
+        end_head = body.find(b"\r\n\r\n", pos)
+        end = body.find(b"\r\n" + delim, end_head + 4) if end_head >= 0 else -1
+        if end < 0:
+            raise JobError(400, "bad_form", "the multipart form is cut off")
+        # browsers send non-ASCII file names as raw UTF-8
+        headers = BytesParser(policy=email_policy).parsebytes(
+            bytes(body[pos + 2:end_head + 4]), headersonly=True)
+        yield headers, view[end_head + 4:end]
+        pos = end + 2 + len(delim)
+
+
 def _parse_upload(ctype: str, body: bytes, q: dict[str, str],
-                  header_name: str | None) -> tuple[bytes, str, dict[str, str]]:
+                  header_name: str | None) -> tuple[bytes | memoryview, str, dict[str, str]]:
     """The PDF, its file name and the options of a ``POST /api/convert``: either the raw PDF
     as the body (``?filename=…`` or an ``X-Filename`` header) or a multipart form with a
     ``file`` field. Options come from the query string and, for a form, its other fields."""
     fields = dict(q)
     if ctype.lower().startswith("multipart/form-data"):
-        msg = BytesParser(policy=email_policy).parsebytes(
-            b"MIME-Version: 1.0\r\nContent-Type: " + ctype.encode("latin-1") + b"\r\n\r\n"
-            + body)
-        data: bytes | None = None
+        data: memoryview | None = None
         filename = ""
-        for part in msg.iter_parts():
-            name = part.get_param("name", header="content-disposition") or ""
-            if part.get_filename() is not None or name == "file":
-                payload = part.get_payload(decode=True)
-                data = payload if isinstance(payload, bytes) else b""
-                filename = part.get_filename() or ""
+        for headers, content in _form_parts(ctype, body):
+            name = headers.get_param("name", header="content-disposition") or ""
+            if headers.get_filename() is not None or name == "file":
+                data, filename = content, headers.get_filename() or ""
             elif name:
-                fields[str(name)] = str(part.get_content()).strip()
+                fields[str(name)] = bytes(content).decode("utf-8", "replace").strip()
         if data is None:
             raise JobError(400, "no_file", "the form has no 'file' field")
         return data, filename, fields
@@ -338,8 +525,38 @@ def _parse_upload(ctype: str, body: bytes, q: dict[str, str],
     return body, filename, fields
 
 
+def host_allowed(host_header: str, names: Sequence[str] = ()) -> bool:
+    """Whether a request's ``Host`` names this server: an IP address, ``localhost``, or a name
+    the server was started with. Anything else is DNS rebinding: a web site whose name was
+    pointed at 127.0.0.1 would otherwise count as this server's own origin, and its scripts
+    could read every conversion and upload PDFs. ``"*"`` in ``names`` accepts any name: for a
+    server behind a reverse proxy or in a container, where the proxy checks the name."""
+    host = host_header.strip().lower()
+    if host.startswith("["):                          # [::1]:8765
+        host = host[1:host.find("]")] if "]" in host else ""
+    elif host.count(":") == 1:
+        host = host.rsplit(":", 1)[0]
+    if not host:
+        return False
+    if "*" in names:
+        return True
+    try:
+        ipaddress.ip_address(host)
+        return True                                   # rebinding needs a name, not an address
+    except ValueError:
+        pass
+    return host == "localhost" or host.endswith(".localhost") or host in names
+
+
+# routes of the proof viewer (web pages, XSLT rendering, QA page images); an API-only server
+# (a deployment that only converts) answers 404 for them
+_VIEW_ONLY = {"", "upload", "view", "inspect", "inspector", "api/stamp", "api/pages",
+              "api/inspection", "api/page-image", "api/inspection-stamp"}
+
+
 def _handler(viewer: Viewer, jobs: ConversionQueue | None = None,
-             cors: Sequence[str] = ()) -> type[BaseHTTPRequestHandler]:
+             cors: Sequence[str] = (), hosts: Sequence[str] = (),
+             api_only: bool = False) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         server_version = "pdf2xml-preview"
 
@@ -357,6 +574,35 @@ def _handler(viewer: Viewer, jobs: ConversionQueue | None = None,
             if origin in (f"http://{host}", f"https://{host}") or origin in cors or "*" in cors:
                 return origin
             return None
+
+        def _bad_host(self, as_json: bool = True) -> bool:
+            """Refuse a request whose Host is not this server (see ``host_allowed``)."""
+            if host_allowed(self.headers.get("Host", ""), hosts):
+                return False
+            self._discard_body()
+            if as_json:
+                self._error(403, "host", "unknown Host header; open the server by its address "
+                                         "or as localhost")
+            else:
+                self._send(403, "unknown Host header", "text/plain")
+            return True
+
+        def _discard_body(self) -> None:
+            """Read the body of a request refused before it was read, so the client gets the
+            answer: closing a socket with unread data resets the connection (on Windows), and
+            the client sees a connection error instead of the 403. A large body is not read;
+            the connection closes after the answer."""
+            if getattr(self, "_body_read", False):
+                return
+            self._body_read = True
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                n = 0
+            if 0 < n <= 1 << 20:
+                self.rfile.read(n)
+            elif n:
+                self.close_connection = True
 
         def _foreign(self) -> bool:
             """A write from another web site (a form or script on some page the user has
@@ -391,6 +637,9 @@ def _handler(viewer: Viewer, jobs: ConversionQueue | None = None,
             self._json({"error": code, "message": message}, status)
 
         def _parts(self) -> tuple[list[str], dict[str, str]]:
+            """The request's path and query; called first by every method, so it also starts
+            the request's state (one handler serves every request of a kept-alive connection)."""
+            self._body_read = False
             url = urlparse(self.path)
             q = {k: v[0] for k, v in parse_qs(url.query).items()}
             return [unquote(p) for p in url.path.split("/") if p], q
@@ -398,6 +647,8 @@ def _handler(viewer: Viewer, jobs: ConversionQueue | None = None,
         # ---------------------------------------------------- methods
         def do_OPTIONS(self) -> None:  # noqa: N802 (http.server naming)
             """CORS preflight for a frontend served from another origin."""
+            if self._bad_host():
+                return
             if not cors or self._allowed_origin() is None:
                 self._error(403, "origin", "this origin may not use the API")
                 return
@@ -408,9 +659,16 @@ def _handler(viewer: Viewer, jobs: ConversionQueue | None = None,
 
         def do_GET(self) -> None:  # noqa: N802 (http.server naming)
             parts, q = self._parts()
+            if self._bad_host(as_json=parts[:2] == ["api", "jobs"]):
+                return
             try:
                 if parts[:2] == ["api", "jobs"]:
                     self._jobs_get(parts)
+                elif parts == ["api", "health"]:
+                    self._json(self._health())
+                elif api_only and ("/".join(parts[:2]) in _VIEW_ONLY
+                                   or (parts[:1] or [""])[0] in _VIEW_ONLY):
+                    raise NotFound(f"{self.path} (this server only converts)")
                 else:
                     self._route(parts, q)
             except JobError as e:
@@ -424,22 +682,41 @@ def _handler(viewer: Viewer, jobs: ConversionQueue | None = None,
 
         def do_POST(self) -> None:  # noqa: N802 (http.server naming)
             parts, q = self._parts()
+            if self._bad_host():
+                return
             try:
                 if self._foreign():
                     raise JobError(403, "origin", "requests from other web sites are refused")
                 if parts == ["api", "convert"]:
                     self._convert(q)
+                elif parts == ['api', 'inspection-source'] and not api_only:
+                    length = int(self.headers.get('Content-Length') or 0)
+                    if not 0 < length <= 300 * 1024 * 1024:
+                        raise JobError(413, 'source_size', 'Choose a PDF smaller than 300 MB')
+                    body = self.rfile.read(length)
+                    self._body_read = True
+                    try:
+                        viewer.bind_source(q['doc'], body)
+                    except NotFound as exc:
+                        raise JobError(404, 'source_document', str(exc)) from exc
+                    except ValueError as exc:
+                        raise JobError(400, 'source_mismatch', str(exc)) from exc
+                    self._json({'source_verified': True})
                 elif len(parts) == 4 and parts[:2] == ["api", "jobs"] and parts[3] == "cancel":
                     self._json(self._queue().cancel(parts[2]).to_json())
                 else:
                     raise JobError(404, "not_found", f"no route POST {urlparse(self.path).path}")
             except JobError as e:
+                self._discard_body()
                 self._error(e.status, e.code, e.message)
             except Exception as e:                                  # keep the server up
+                self._discard_body()
                 self._error(500, "server_error", f"{type(e).__name__}: {e}")
 
         def do_DELETE(self) -> None:  # noqa: N802 (http.server naming)
             parts, _ = self._parts()
+            if self._bad_host():
+                return
             try:
                 if self._foreign():
                     raise JobError(403, "origin", "requests from other web sites are refused")
@@ -449,11 +726,21 @@ def _handler(viewer: Viewer, jobs: ConversionQueue | None = None,
                     raise JobError(404, "not_found",
                                    f"no route DELETE {urlparse(self.path).path}")
             except JobError as e:
+                self._discard_body()
                 self._error(e.status, e.code, e.message)
             except Exception as e:                                  # keep the server up
                 self._error(500, "server_error", f"{type(e).__name__}: {e}")
 
         # ---------------------------------------------------- conversion jobs
+        def _health(self) -> dict[str, Any]:
+            """For load balancers and container health checks: the server answers, and how
+            busy the queue is."""
+            from pdf2xml import __version__
+
+            states = [j.state for j in jobs.list()] if jobs is not None else []
+            return {"status": "ok", "version": __version__, "converts": jobs is not None,
+                    "queued": states.count("queued"), "running": states.count("running")}
+
         def _queue(self) -> ConversionQueue:
             if jobs is None:
                 raise JobError(503, "disabled", "conversions are not enabled on this server")
@@ -469,6 +756,7 @@ def _handler(viewer: Viewer, jobs: ConversionQueue | None = None,
                 raise JobError(413, "too_large", f"the upload is larger than "
                                                  f"{queue_.max_upload // (1024 * 1024)} MB")
             body = self.rfile.read(length)
+            self._body_read = True
             data, filename, fields = _parse_upload(self.headers.get("Content-Type", ""), body,
                                                    q, self.headers.get("X-Filename"))
             job = queue_.submit(data, filename, fields)
@@ -489,6 +777,11 @@ def _handler(viewer: Viewer, jobs: ConversionQueue | None = None,
                 self._send(200, (UI_DIR / "index.html").read_bytes(), "text/html")
             elif parts == ["upload"]:
                 self._send(200, (UI_DIR / "upload.html").read_bytes(), "text/html")
+            elif parts == ['inspect']:
+                self._send(200, (UI_DIR / 'inspector.html').read_bytes(), 'text/html')
+            elif len(parts) == 2 and parts[0] == 'inspector' and parts[1] in (
+                    'inspector.js', 'inspector.css', 'quality-report.js'):
+                self._send(200, (UI_DIR / parts[1]).read_bytes(), _mime(UI_DIR / parts[1]))
             elif parts[0] == "api" and len(parts) == 2:
                 name = parts[1]
                 if name == "docs":
@@ -504,6 +797,12 @@ def _handler(viewer: Viewer, jobs: ConversionQueue | None = None,
                     self._json(v.report(q["doc"]))
                 elif name == "pages":
                     self._json(v.pages(q["doc"]))
+                elif name == 'inspection':
+                    self._json(v.inspection(q['doc'], q['file'], int(q.get('page', '0'))))
+                elif name == 'inspection-stamp':
+                    self._json({'stamp': v.inspection_stamp(q['doc'], q['file'])})
+                elif name == 'page-image':
+                    self._send(200, v.page_frame(q['doc'], int(q.get('page', '1')))[0], 'image/png')
                 else:
                     raise NotFound(self.path)
             elif parts[0] == "view" and len(parts) >= 4:
@@ -528,12 +827,17 @@ def _handler(viewer: Viewer, jobs: ConversionQueue | None = None,
 
 
 def make_server(viewer: Viewer, host: str = "127.0.0.1", port: int = 8765,
-                jobs: ConversionQueue | None = None,
-                cors: Sequence[str] = ()) -> ThreadingHTTPServer:
+                jobs: ConversionQueue | None = None, cors: Sequence[str] = (),
+                allowed_hosts: Sequence[str] = (), api_only: bool = False
+                ) -> ThreadingHTTPServer:
     """``jobs``: accept PDF uploads and convert them (``POST /api/convert``); without it the
     server only views existing conversions. ``cors``: origins of a frontend served elsewhere
-    (e.g. ``http://localhost:5173``) that may call the API."""
-    server = ThreadingHTTPServer((host, port), _handler(viewer, jobs, tuple(cors)))
+    (e.g. ``http://localhost:5173``) that may call the API. Requests must name the server by
+    an IP address, ``localhost``, ``host`` or one of ``allowed_hosts`` (``"*"``: any; see
+    ``host_allowed``). ``api_only``: no viewer pages or XSLT rendering, only the API."""
+    names = tuple(n.strip().lower() for n in (host, *allowed_hosts) if n.strip())
+    server = ThreadingHTTPServer((host, port), _handler(viewer, jobs, tuple(cors), names,
+                                                        api_only))
     server.daemon_threads = True
     return server
 
@@ -541,23 +845,33 @@ def make_server(viewer: Viewer, host: str = "127.0.0.1", port: int = 8765,
 def serve(root: Path, host: str = "127.0.0.1", port: int = 8765,
           sheets: list[Path] | None = None, open_browser: bool = True,
           convert: bool = True, engine: str = "docling", max_upload_mb: int = 300,
-          cors: Sequence[str] = ()) -> None:
-    viewer = Viewer(root, sheets)
-    jobs = (ConversionQueue(viewer.root, default_engine=engine, max_upload_mb=max_upload_mb)
-            if convert else None)
-    server = make_server(viewer, host, port, jobs, cors)
+          cors: Sequence[str] = (), models_dir: Path | None = None,
+          grobid_url: str | None = None, allowed_hosts: Sequence[str] = (),
+          api_only: bool = False, jobs: ConversionQueue | None = None,
+          source_roots: Sequence[Path] = (), layout: bool = False) -> None:
+    """``jobs``: a ready queue (the deploy package configures its own); else one is made
+    when ``convert`` is set."""
+    viewer = Viewer(root, sheets, source_roots)
+    if jobs is None and convert:
+        jobs = ConversionQueue(viewer.root, default_engine=engine, max_upload_mb=max_upload_mb,
+                               models_dir=models_dir, grobid_url=grobid_url)
+    server = make_server(viewer, host, port, jobs, cors, allowed_hosts, api_only)
     url = f"http://{host}:{server.server_address[1]}/"
-    print(f"pdf2xml preview: {url}  (folder {viewer.root}; Ctrl+C to stop)", flush=True)
+    kind = "API" if api_only else "preview"
+    print(f"pdf2xml {kind}: {url}  (folder {viewer.root}; Ctrl+C to stop)", flush=True)
     if jobs is not None:
-        print(f"  upload and convert: {url}upload  (engine {engine}, "
-              f"max {max_upload_mb} MB)", flush=True)
+        page = "api/convert" if api_only else "upload"
+        print(f"  upload and convert: {url}{page}  (engine {jobs.default_engine}, "
+              f"max {jobs.max_upload // (1024 * 1024)} MB)", flush=True)
+    for name in allowed_hosts:
+        print(f"  Host allowed: {name}", flush=True)
     for origin in cors:
         print(f"  CORS allowed for {origin}", flush=True)
     for s in viewer.sheets.values():
         if not s.builtin:
             print(f"  stylesheet {s.name}: {s.path}", flush=True)
     if open_browser:
-        threading.Timer(0.5, webbrowser.open, args=(url,)).start()
+        threading.Timer(0.5, webbrowser.open, args=(url + ('inspect' if layout else ''),)).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -38,7 +38,10 @@ _PART = re.compile(
     r"(?P<name>[A-Z][^;()]*?),?\s+(?P<year>" + _YEAR_RE + ")")
 # "Smith (2019)", "Smith and Lee (2019)", "Smith et al. (2019, 2020)",
 # "the World Health Organization (2021)"
-_NAME_WORD = r"[A-Z][\w'’\-]+"
+# a name word: "O'Brien" keeps its apostrophe, the possessive "Logan's" does not; names joined
+# by a slash ("ICTD/UNU-WIDER") are one name
+_NAME_CHARS = r"(?:[\w\-]|['’](?!s\b))+"
+_NAME_WORD = rf"[A-Z]{_NAME_CHARS}(?:/[A-Z]{_NAME_CHARS})*"
 _NARRATIVE = re.compile(
     r"\b(?P<name>" + _NAME_WORD + r"(?:(?:\s+(?:of|for|and|the|on|in|&)){0,2}\s+" + _NAME_WORD
     + r"){0,6}(?:\s+et\s+al\.)?)(?:’s|'s)?\s+"
@@ -236,7 +239,12 @@ def find_links(text: str, ctx: LinkContext, *, citations: bool = True,
                               {"ref-type": "bibr", "rid": " ".join(dict.fromkeys(rids))}))
     if callouts and ctx.callouts and ctx.targets:
         for m in _CALLOUT.finditer(text):
-            tgt = ctx.targets.get(label_key(f"{m.group(1)} {m.group(2)}"))
+            key = label_key(f"{m.group(1)} {m.group(2)}")
+            tgt = ctx.targets.get(key)
+            if tgt is None and key.startswith('figure '):
+                # A panel callout (Fig. 2.8A) resolves to its containing figure
+                # only when no separately labelled panel target exists.
+                tgt = ctx.targets.get(re.sub(r'(?<=\d)[a-z]$', '', key))
             if tgt and not _overlaps(spans, m.start(), m.end()):
                 spans.append((m.start(), m.end(), "xref",
                               {"ref-type": _REF_TYPES.get(tgt[1], tgt[1]), "rid": tgt[0]}))
@@ -363,7 +371,7 @@ def _resolve_at(ctx: LinkContext, name: str, year: str) -> tuple[str, int] | Non
     found = list(re.finditer(r"[A-Za-z][A-Za-z'’\-]*", first))
     if not found:
         return None
-    words = [m.group(0) for m in found]
+    words = [re.sub(r"['’]s?$", "", m.group(0)) or m.group(0) for m in found]  # "Logan's"
     for k in range(len(words)):
         sub = [w.lower() for w in words[k:]]
         for key in (sub[0], " ".join(sub), "".join(sub)):

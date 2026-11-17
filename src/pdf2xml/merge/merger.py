@@ -7,12 +7,12 @@ grouped into new paragraphs inserted into the reading order. Every word ends up 
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from pdf2xml.extract.types import BBox, RawBlock, RawCell, StructureLayer, StyleLayer, Word
-from pdf2xml.merge.text import ARun, Line, build_runs, group_lines
+from pdf2xml.merge.text import ARun, Line, build_runs, group_lines, fix_ligatures
 
 _TEXT_KINDS = {"title", "heading", "paragraph", "list_item", "caption", "footnote", "code",
                "reference", "other", "formula"}
@@ -47,6 +47,7 @@ class MergeResult:
     warnings: list[str]
     dehyphenated: int
     orphans: int
+    dehyphenated_by_page: dict[int, int] = field(default_factory=dict)
 
 
 def _area(b: BBox) -> float:
@@ -96,8 +97,10 @@ def merge(
             best, best_share = None, 0.0
             for mb in cands:
                 s = _share(w.bbox, mb.bbox)
-                if s > best_share or (s == best_share and s > 0 and best is not None
-                                      and _area(mb.bbox) < _area(best.bbox)):
+                if s > best_share or (s == best_share and s > 0 and best is not None and (
+                        _area(mb.bbox) < _area(best.bbox) or (
+                            _area(mb.bbox) == _area(best.bbox) and best.kind == "figure"
+                            and mb.kind in _TEXT_KINDS))):
                     best, best_share = mb, s
             if best is not None and best_share >= threshold:
                 best.words.append(w)
@@ -115,7 +118,21 @@ def merge(
             if near is not None and _distance(w.bbox, near.bbox) <= 0.6 * w.size:
                 near.words.append(w)
             else:
-                leftover.append(w)
+                # A single glyph on a float's edge can fall outside the model
+                # bbox (notably italic index suffixes and punctuation). Preserve
+                # it with the source figure/table, not as invented body prose.
+                image = min((mb for mb in cands if (mb.kind == "figure" or
+                             mb.kind == "table" and any(c.bbox for c in mb.raw.cells))
+                             and len(w.text) == 1 and mb.bbox[1] <= w.top
+                             and w.bottom <= mb.bbox[3]),
+                            key=lambda mb: _distance(w.bbox, mb.bbox), default=None)
+                if image is not None and _distance(w.bbox, image.bbox) <= 0.6 * w.size:
+                    image.words.append(w)
+                    x0, y0, x1, y1 = image.bbox
+                    image.raw.bbox = (min(x0, w.x0), min(y0, w.top),
+                                      max(x1, w.x1), max(y1, w.bottom))
+                else:
+                    leftover.append(w)
         if leftover:
             new_blocks = _orphan_blocks(leftover, page.number)
             # slug lines and marks outside a printer's trim box are expected to be loose (they
@@ -139,9 +156,12 @@ def merge(
         ordered.extend(inserted.get(i, []))
 
     joins = 0
+    by_page_joins: dict[int, int] = defaultdict(int)
     for mb in ordered:
-        joins += _build(mb, dehyphenate, warnings)
-    return MergeResult(ordered, warnings, joins, orphan_total)
+        removed = _build(mb, dehyphenate, warnings)
+        joins += removed
+        by_page_joins[mb.page] += removed
+    return MergeResult(ordered, warnings, joins, orphan_total, dict(by_page_joins))
 
 
 def _orphan_blocks(words: Sequence[Word], page: int) -> list[MBlock]:
@@ -192,13 +212,20 @@ def _build(mb: MBlock, dehyphenate: bool, warnings: list[str]) -> int:
 
 def _build_table(mb: MBlock, dehyphenate: bool, warnings: list[str]) -> int:
     cells = mb.raw.cells
-    if not cells:
+    def characters(text: str) -> Counter[str]:
+        return Counter(c for c in fix_ligatures(text) if not c.isspace())
+
+    no_boxes = not any(c.bbox is not None for c in cells)
+    incomplete_transcription = (bool(mb.words) and no_boxes and
+        characters(" ".join(w.text for w in mb.words)) != characters(" ".join(c.text for c in cells)))
+    if not cells or incomplete_transcription:
         # No cell structure: keep the words as one paragraph-like cell so nothing is lost.
         mb.lines = group_lines(mb.words)
         res = build_runs(mb.lines, dehyphenate=dehyphenate)
         mb.cells = [(RawCell(row=0, col=0), res.runs)]
         mb.raw.n_rows, mb.raw.n_cols = 1, 1
-        warnings.append(f"page {mb.page}: table without cell structure kept as a single cell")
+        warnings.append(f"page {mb.page}: table without reliable cell geometry/transcription "
+                        "preserved from native PDF words as a single cell; review its structure")
         return res.dehyphenated
     has_boxes = any(c.bbox is not None for c in cells)
     per_cell: dict[int, list[Word]] = defaultdict(list)

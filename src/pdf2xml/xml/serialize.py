@@ -52,6 +52,12 @@ def _common(el: etree._Element, b: Block) -> None:
     el.set("bbox", _bbox(b.bbox))
     if b.style:
         el.set("style", b.style)
+    if b.source_ref:
+        el.set("source-ref", b.source_ref)
+    if b.region_id:
+        el.set("region-id", b.region_id)
+    if isinstance(b, Heading) and b.role:
+        el.set("role", b.role)
 
 
 def _para(el: etree._Element, p: ParaProps | None) -> None:
@@ -124,6 +130,8 @@ def _block(parent: etree._Element, b: Block) -> None:
         el = etree.SubElement(parent, "formula")
         _common(el, b)
         el.set("display", _bool(b.display))
+        if b.image:
+            el.set("src", b.image)
         if b.latex:
             etree.SubElement(el, "tex").text = b.latex
         if b.mathml:
@@ -173,6 +181,8 @@ def _block(parent: etree._Element, b: Block) -> None:
             el.set("caption-ref", b.caption_ref)
         if b.alt:
             el.set("alt", b.alt)
+        if b.decorative is not None:
+            el.set("decorative", _bool(b.decorative))
     elif isinstance(b, Box):
         el = etree.SubElement(parent, "box")
         _common(el, b)
@@ -203,6 +213,14 @@ def to_xml(doc: Document) -> etree._Element:
         st = etree.SubElement(meta, "stats")
         for k in sorted(m.stats):
             etree.SubElement(st, "stat", name=k, value=str(m.stats[k]))
+    if m.outline:
+        outline = etree.SubElement(meta, "outline")
+        for entry in m.outline:
+            el = etree.SubElement(outline, "entry", page=str(entry.page), kind=entry.kind,
+                                  depth=str(entry.depth))
+            el.text = entry.title
+            if entry.label:
+                el.set("label", entry.label)
 
     styles = etree.SubElement(root, "styles")
     for key in sorted(doc.styles):

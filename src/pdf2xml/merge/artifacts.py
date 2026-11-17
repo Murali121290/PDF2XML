@@ -39,7 +39,8 @@ def detect_artifacts(blocks: Sequence[MBlock], frames: dict[int, BBox]) -> int:
     """
     for mb in blocks:
         frame = frames.get(mb.page)
-        if frame is not None and _inside_share(mb.bbox, frame) < 0.5:
+        if (mb.raw.role == "margin-label" or
+                frame is not None and _inside_share(mb.bbox, frame) < 0.5):
             mb.artifact = "other"
         elif mb.kind in ("page_header", "page_footer"):
             if _PAGE_NO.match(runs_text(mb.runs)):

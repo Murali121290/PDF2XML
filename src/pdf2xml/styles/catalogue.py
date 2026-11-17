@@ -71,7 +71,8 @@ def build_catalogue(blocks: Sequence[MBlock]) -> Catalogue:
         d = dom.get(id(mb))
         if mb.kind == "paragraph" and d is not None and d[1] >= body_size * 1.3:
             text = runs_text(mb.runs)
-            if len(text) < 150 and len(mb.lines) <= 3 and not text.rstrip().endswith("."):
+            if (len(text) < 150 and len(mb.lines) <= 3 and not text.rstrip().endswith(".")
+                    and not text.strip().isdigit() and mb.raw.role != "margin-label"):
                 mb.raw.kind = "heading"
                 cat.promoted += 1
 
@@ -81,6 +82,8 @@ def build_catalogue(blocks: Sequence[MBlock]) -> Catalogue:
     # Headings: levels from distinct (size, bold) combinations, largest first.
     heading_sigs = {dom[id(mb)] for mb in content if mb.kind in _HEADING_KINDS and id(mb) in dom}
     tiers = sorted({(s[1], s[2]) for s in heading_sigs}, key=lambda t: (-t[0], not t[1]))
+    # Style names keep their visual rank, but do not collapse the document's semantic
+    # hierarchy to h6 merely because a title page has many large display sizes.
     level_of = {t: min(i + 1, 6) for i, t in enumerate(tiers)}
     per_level: dict[int, int] = defaultdict(int)
     for s in sorted(heading_sigs, key=lambda s: (-s[1], not s[2], -usage[s], s)):
@@ -125,6 +128,28 @@ def build_catalogue(blocks: Sequence[MBlock]) -> Catalogue:
         cat.block_style[id(mb)] = names[d]
         if mb.kind in _HEADING_KINDS:
             cat.heading_level[id(mb)] = level_of.get((d[1], d[2]), 1)
+    if any(mb.raw.role == "chapter" for mb in content):
+        # Within a chapter, modules and their sections are separate from book display
+        # typography. Keep section styles locally ranked, with tolerant size buckets.
+        chapter_heads: list[MBlock] = []
+        def assign() -> None:
+            sizes: list[float] = []
+            for head in sorted(chapter_heads, key=lambda h: -dom[id(h)][1]):
+                size = dom[id(head)][1]
+                if not sizes or abs(sizes[-1] - size) > 0.1 * sizes[-1]:
+                    sizes.append(size)
+                cat.heading_level[id(head)] = min(3 + len(sizes) - 1, 6)
+        for mb in content:
+            if mb.kind not in _HEADING_KINDS or id(mb) not in dom:
+                continue
+            if mb.raw.role == "chapter":
+                assign()
+                chapter_heads = []
+            if mb.raw.role and mb.raw.level:
+                cat.heading_level[id(mb)] = mb.raw.level
+            elif not mb.raw.region_id:
+                chapter_heads.append(mb)
+        assign()
     return cat
 
 

@@ -109,6 +109,11 @@ def group_lines(words: Sequence[Word], split_gap: float | None = None) -> list[L
         target = None
         for ln in reversed(lines[-4:]):
             h = ln.bottom - ln.top
+            # a raised or lowered small word (a note number) is placed by the fold below,
+            # which picks the line it overlaps most: here it would join whichever line came
+            # first, e.g. the line above the one it belongs to
+            if w.size < 0.85 * ln.size or ln.size < 0.85 * w.size:
+                continue
             if ln.top - 0.1 * h <= cy <= ln.bottom + 0.1 * h and _no_x_overlap(ln, w):
                 target = ln
                 break
@@ -117,22 +122,33 @@ def group_lines(words: Sequence[Word], split_gap: float | None = None) -> list[L
         else:
             target.words.append(w)
 
-    # Fold small-print lines (sup/sub) into an overlapping larger line.
+    # Fold small-print lines (sup/sub) into an overlapping larger line: the one they overlap
+    # most (a note number raised after a title's second line also touches its first line),
+    # then the nearest one across.
     lines.sort(key=lambda ln: ln.size, reverse=True)
     kept: list[Line] = []
     for ln in lines:
-        host = next(
-            (k for k in kept
-             if ln.size < 0.85 * k.size and ln.bottom > k.top and ln.top < k.bottom
-             and all(_no_x_overlap(k, w) for w in ln.words)),
-            None,
-        )
-        if host is not None:
-            host.words.extend(ln.words)
-        else:
-            kept.append(ln)
+        # A single colliding sub/superscript must not strand every small glyph on
+        # that baseline. O with a subscript 2 and superscript minus deliberately
+        # has two glyphs at the same x; resolve each against the *base* letters.
+        remaining = []
+        for w in ln.words:
+            hosts = [k for k in kept
+                     if w.size < 0.85 * k.size and w.bottom > k.top and w.top < k.bottom
+                     and _script_fits(k, w)]
+            host = max(hosts, key=lambda k: (
+                min(w.bottom, k.bottom) - max(w.top, k.top),
+                -_x_gap(k, Line([w]))), default=None)
+            if host is not None:
+                host.words.append(w)
+            else:
+                remaining.append(w)
+        if remaining:
+            kept.append(Line(remaining))
     for ln in kept:
-        ln.words.sort(key=lambda w: w.x0)
+        # Equal-x scientific scripts have a stable textual order: subscript
+        # before superscript, independently of their discovery order.
+        ln.words.sort(key=lambda w: (round(w.x0, 1), -w.top))
     if split_gap is not None:
         split: list[Line] = []
         for ln in kept:
@@ -156,6 +172,24 @@ def _no_x_overlap(line: Line, w: Word) -> bool:
     return all(w.x0 >= o.x1 - 0.5 or w.x1 <= o.x0 + 0.5 for o in line.words)
 
 
+def _script_fits(line: Line, w: Word) -> bool:
+    for other in line.words:
+        if w.x0 >= other.x1 - 0.5 or w.x1 <= other.x0 + 0.5:
+            continue
+        # Opposite scripts can share x, but a small glyph cannot overwrite a
+        # base letter or another glyph at the same vertical position.
+        if other.size >= 0.85 * line.size or min(w.bottom, other.bottom) > max(
+                w.top, other.top) + 0.5:
+            return False
+    return True
+
+
+def _x_gap(line: Line, small: Line) -> float:
+    """Horizontal distance from the small line's words to the nearest word of ``line``."""
+    return min((max(0.0, w.x0 - o.x1, o.x0 - w.x1) for w in small.words for o in line.words),
+               default=0.0)
+
+
 # ---------------------------------------------------------------- runs
 
 def _script(w: Word, line: Line) -> tuple[bool, bool]:
@@ -166,7 +200,7 @@ def _script(w: Word, line: Line) -> tuple[bool, bool]:
     base_bottom = statistics.median(b.bottom for b in base_words)
     if base_bottom - w.bottom > 0.2 * base:
         return True, False
-    if w.bottom - base_bottom > 0.1 * base:
+    if w.bottom - base_bottom >= 0.08 * base:
         return False, True
     return False, False
 
@@ -233,8 +267,16 @@ def build_runs(
             and last.text[-2].isalpha()
             and nxt[:1].islower()
         ):
-            last.text = last.text[:-1]
-            joins += 1
+            # These lexical first components require the printed compound
+            # hyphen; they are not syllables split merely by line wrapping.
+            first = re.search(r"([A-Za-z]+)-$", last.text)
+            compound = first is not None and first[1].lower() in {
+                "self", "well", "evidence", "risk", "strength", "health", "long", "short",
+                "patient", "person", "population", "individual", "disease", "high", "low",
+            }
+            if not compound:
+                last.text = last.text[:-1]
+                joins += 1
         else:
             last.text += " "
 

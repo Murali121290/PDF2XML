@@ -46,7 +46,8 @@ def docling_available() -> bool:
     return True
 
 
-def get_structure_engine(name: str) -> StructureEngine:
+def get_structure_engine(name: str, models_dir: Path | None = None) -> StructureEngine:
+    """``models_dir``: Docling's pre-downloaded models (see ``structure_docling``)."""
     if name == "auto":
         name = "docling" if docling_available() else "heuristic"
         if name == "heuristic":
@@ -54,7 +55,7 @@ def get_structure_engine(name: str) -> StructureEngine:
     if name == "docling":
         from pdf2xml.extract.structure_docling import DoclingEngine
 
-        return DoclingEngine()
+        return DoclingEngine(models_dir)
     if name == "heuristic":
         from pdf2xml.extract.structure_heuristic import HeuristicEngine
 

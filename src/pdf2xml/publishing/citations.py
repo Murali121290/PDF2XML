@@ -40,17 +40,17 @@ class Parsed:
 
 
 _YEAR_PAREN = re.compile(
-    r"\(\s*(?P<year>(?:1[5-9]|20)\d{2}[a-z]?|n\.\s?d\.|in press|forthcoming)"
+    r"\(\s*(?P<year>(?:1[5-9]|20)\d{2}[a-z]?|n\.\s?d\.?(?:-[a-z])?|in press|forthcoming)"
     r"(?:\s*,\s*(?P<month>[A-Z][a-z]+\.?)(?:\s+(?P<day>\d{1,2})(?:\s*[–-]\s*\d{1,2})?)?)?\s*\)",
     re.I)
 _YEAR_BARE = re.compile(r"(?<=[.,]\s)(?P<year>(?:1[5-9]|20)\d{2}[a-z]?)(?=[.,]\s|\.$|$)")
 _INITIALS = re.compile(r"^(?:[A-Z][a-z]?\.?\s?-?\s?){1,5}$")           # "J.", "J. C.", "J.-P."
 _FIRST_NAMES = re.compile(r"^[A-Z][a-z'’\-]+(?:\s+(?:[A-Z]\.|[A-Z][a-z'’\-]+)){0,3}$")
 _SURNAME = re.compile(r"^(?:(?:van|von|de|der|den|da|di|del|la|le|du|bin|al|el|st\.?)\s+)*"
-                      r"[A-ZÀ-ɏ][\w'’.\-]*(?:[\s-][A-ZÀ-ɏ][\w'’\-]*){0,2}$")
+                      r"[A-ZÀ-ɏ][\w'’.\-‐‑]*(?:(?:[\s\-‐‑]|\s+(?:y|de|del|van|von)\s+)[A-ZÀ-ɏ][\w'’\-‐‑]*){0,3}$")
 _VANC_NAME = re.compile(r"^(?P<sur>[A-ZÀ-ɏ][\w'’\-]+(?:\s[A-ZÀ-ɏ][\w'’\-]+)?)"
                         r"\s(?P<giv>[A-Z]{1,4})$")
-_SEP = re.compile(r"\s*,\s*(?:(?:&|and)\s+)?|\s+(?:&|and)\s+")
+_SEP = re.compile(r"\s*,\s*(?:&\s*|and\s+)?|\s+(?:&|and)\s+")
 _ETAL = re.compile(r"\bet\s+al\.?", re.I)
 _URL = re.compile(r"(?:https?://\s?|www\.)\S+|\bdoi:\s*10\.\d{4,9}/\S+", re.I)
 _DOI_IN_URL = re.compile(r"10\.\d{4,9}/\S+")
@@ -112,6 +112,15 @@ def _people(text: str, s: int, e: int, group_type: str) -> tuple[Span | None, li
     surnames: list[str] = []
     collabs: list[str] = []
     words = [seg[a:b] for a, b in toks]
+    suffixes: dict[int, int] = {}
+    for i, word in enumerate(words):
+        if re.fullmatch(r"(?:Jr|Sr|II|III|IV)\.?", word) and i >= 2:
+            suffixes[i - 1] = i
+        if word.startswith(("…", "...")):
+            a, b = toks[i]
+            skip = len(word) - len(word.lstrip("…. &"))
+            toks[i] = (a + skip, b)
+            words[i] = seg[a + skip:b]
     etal = [i for i, w in enumerate(words) if _ETAL.fullmatch(w.strip(". ") + ".")]
 
     def add_etal(i: int) -> None:
@@ -121,7 +130,7 @@ def _people(text: str, s: int, e: int, group_type: str) -> tuple[Span | None, li
             group.children.append(Span(s + m.start(), s + m.end(), "etal"))
 
     # "Surname, I." pairs (APA, Harvard)
-    names = [i for i in range(len(words)) if i not in etal]
+    names = [i for i in range(len(words)) if i not in etal and i not in suffixes.values() and words[i].strip(". ")]
     if len(names) >= 2 and len(names) % 2 == 0 and all(
             _SURNAME.match(words[names[k]]) for k in range(0, len(names), 2)) and (
             all(_INITIALS.match(words[names[k]]) for k in range(1, len(names), 2))
@@ -130,6 +139,10 @@ def _people(text: str, s: int, e: int, group_type: str) -> tuple[Span | None, li
             (a1, b1), (a2, b2) = toks[names[k]], toks[names[k + 1]]
             sn = Span(s + a1, s + b2, "string-name", {}, [
                 Span(s + a1, s + b1, "surname"), Span(s + a2, s + b2, "given-names")])
+            if names[k + 1] in suffixes:
+                sa, sb = toks[suffixes[names[k + 1]]]
+                sn.end = s + sb
+                sn.children.append(Span(s + sa, s + sb, "suffix"))
             group.children.append(sn)
             surnames.append(words[names[k]])
         for i in etal:
@@ -165,7 +178,7 @@ def _people(text: str, s: int, e: int, group_type: str) -> tuple[Span | None, li
         return group, surnames, collabs
     # organisations: no initials anywhere. "Centers for Disease Control and Prevention" is one
     # (the split at " and " is undone); ", &" joins two ("WHO, & Commission on …").
-    if (not any(_INITIALS.match(w) for w in words) and all(w[:1].isupper() for w in words)
+    if (not any(_INITIALS.match(w) and (len(w.strip()) == 1 or "." in w) for w in words) and all(w[:1].isupper() for w in words)
             and len(words) <= 6 and len(seg) <= 200):
         parts: list[tuple[int, int]] = []
         pos = 0
@@ -178,7 +191,38 @@ def _people(text: str, s: int, e: int, group_type: str) -> tuple[Span | None, li
                 group.children.append(Span(s + a, s + b, "collab"))
                 collabs.append(seg[a:b])
         return group, surnames, collabs
-    return None, [], []
+    # Mixed personal/organizational author groups and literal source punctuation errors.
+    mixed = Span(s, e, "person-group", {"person-group-type": group_type})
+    mixed_surnames, mixed_collabs = [], []
+    cursor = 0
+    while cursor < len(names):
+        index = names[cursor]
+        a, b = toks[index]
+        if cursor + 1 < len(names) and _SURNAME.match(words[index]) and _INITIALS.match(words[names[cursor + 1]]):
+            following = names[cursor + 1]
+            ga, gb = toks[following]
+            children = [Span(s + a, s + b, "surname"), Span(s + ga, s + gb, "given-names")]
+            stop = gb
+            if following in suffixes:
+                sa, sb = toks[suffixes[following]]
+                children.append(Span(s + sa, s + sb, "suffix"))
+                stop = sb
+            mixed.children.append(Span(s + a, s + stop, "string-name", {}, children))
+            mixed_surnames.append(words[index])
+            cursor += 2
+        elif (match := _VANC_NAME.fullmatch(words[index])):
+            mixed.children.append(Span(s + a, s + b, "string-name", {}, [
+                Span(s + a + match.start("sur"), s + a + match.end("sur"), "surname"),
+                Span(s + a + match.start("giv"), s + a + match.end("giv"), "given-names")]))
+            mixed_surnames.append(match["sur"])
+            cursor += 1
+        elif words[index][:1].isupper() and re.search(r"\b(?:University|Team|Association|Institute|Council|Organization|Organisation|Alliance)\b", words[index]):
+            mixed.children.append(Span(s + a, s + b, "collab"))
+            mixed_collabs.append(words[index])
+            cursor += 1
+        else:
+            return None, [], []
+    return (mixed, mixed_surnames, mixed_collabs) if mixed.children else (None, [], [])
 
 
 def _link(text: str, s: int, e: int) -> Span:
@@ -248,7 +292,51 @@ def parse_reference(text: str, italic: Sequence[tuple[int, int]] = ()) -> Parsed
     the journal or book title)."""
     if len(text.strip()) < 15:
         return None
-    return _author_year(text, italic) or _vancouver(text, italic)
+    return _legal_reference(text) or _author_year(text, italic) or _vancouver(text, italic) or _undated_journal(text)
+
+
+def _legal_reference(text: str) -> Parsed | None:
+    """Tag explicit statutory references without inventing personal authors."""
+    if not re.search(r"U\.S\.C\.|C\.F\.R\.|\bStat\.|Pub\.?\s*L\.|Public Law", text):
+        return None
+    match = _YEAR_PAREN.search(text)
+    if match is None:
+        match = re.search(r"\((?P<year>(?:1[5-9]|20)\d{2})(?:[–-](?P<last>\d{4}))?\)", text)
+    if match is None:
+        stop, links = _tail_links(text, 0)
+        start, end = _strip(text, 0, stop)
+        return Parsed([Span(start, end, "source"), *links], "legal-doc") if end > start else None
+    start, end = _strip(text, 0, match.start())
+    while end > start and text[end - 1] in " .":
+        end -= 1
+    _, links = _tail_links(text, match.end())
+    spans = [Span(start, end, "source"), Span(match.start("year"), match.end("year"), "year"), *links]
+    if "last" in match.re.groupindex and match.group("last"):
+        spans.insert(2, Span(match.start("last"), match.end("last"), "year"))
+    return Parsed(spans, "legal-doc", year=match.group("year")) if _nested_ok(spans) else None
+
+
+def _undated_journal(text: str) -> Parsed | None:
+    """Only tag positively recognized fields; an absent publication year remains absent."""
+    author_end = _sentence_end_vanc(text)
+    if author_end < 0:
+        return None
+    people, surnames, collabs = _people(text, 0, author_end, "author")
+    if people is None or not surnames:
+        return None
+    stop, links = _tail_links(text, author_end + 1)
+    end = _sentence_end(text, author_end + 1, stop)
+    if end < 0:
+        return None
+    ts, te = _strip(text, author_end + 1, end)
+    js, je = _strip(text, end + 1, stop)
+    while je > js and text[je - 1] in " .":
+        je -= 1
+    journal = _JOURNAL_TAIL.match(text[js:je])
+    if journal is None:
+        return None
+    spans = [people, Span(ts, te, "article-title"), *_journal_spans(journal, js), *links]
+    return Parsed(spans, "journal", surnames, collabs) if _nested_ok(spans) else None
 
 
 def _author_year(text: str, italic: Sequence[tuple[int, int]]) -> Parsed | None:

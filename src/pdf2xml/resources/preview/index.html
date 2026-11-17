@@ -115,6 +115,7 @@
 <body>
 <header>
   <h1>pdf2xml <span>preview</span></h1>
+  <a class="btn" href="/inspect" style="text-decoration:none;color:inherit">Layout QA ↗</a>
   <label class="field">Document <select id="doc"></select></label>
   <label class="field">File <select id="file"></select></label>
   <label class="field">Stylesheet <select id="sheet"></select></label>
@@ -222,9 +223,10 @@ function fillFiles(want) {
 function autoSheet() {
   // the canonical XML needs the EPUB sheet, publishing XML the proof sheet, unless the user chose
   if (HASH.has("sheet")) return;
-  const canonical = $("file").value.includes("canonical");
+  const builtin = $("file").value.includes("canonical") ? "canonical"
+    : $("file").value.includes("content") ? "content" : "proof";
   const chosen = S.sheets.find((s) => s.id === $("sheet").value);
-  if (!S.sheetPicked || (chosen && chosen.builtin)) $("sheet").value = canonical ? "canonical" : "proof";
+  if (!S.sheetPicked || (chosen && chosen.builtin)) $("sheet").value = builtin;
 }
 
 /* ---------------------------------------------------------------- preview */

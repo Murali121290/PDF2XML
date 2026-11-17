@@ -183,6 +183,9 @@ class DocxWriter:
             p = self.d.add_paragraph(style=self._style_of(b))
             self._runs(p, b.runs)
         elif isinstance(b, Formula):
+            if b.image:
+                self._figure(b)
+                return
             p = self.d.add_paragraph(style=self._style_of(b))
             p.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
             self._runs(p, b.runs or [Run(text=b.latex or "")])
@@ -246,7 +249,7 @@ class DocxWriter:
                             run.font.bold = True
                 c = c2 + 1
 
-    def _figure(self, f: Figure) -> None:
+    def _figure(self, f: Figure | Formula) -> None:
         if not f.image or not (self.out_dir / f.image).exists():
             return
         width = min(Pt(f.bbox[2] - f.bbox[0]), self.text_width)

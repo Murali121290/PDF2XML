@@ -16,7 +16,7 @@ from pathlib import Path
 from lxml import etree
 
 from pdf2xml.export.css import build_css
-from pdf2xml.model import Document, Figure, Heading, iter_blocks
+from pdf2xml.model import Document, Figure, Formula, Heading, iter_blocks
 from pdf2xml.xml.xslt import transform
 
 _ZIP_DATE = (2020, 1, 1, 0, 0, 0)   # fixed timestamps → reproducible archives
@@ -118,7 +118,8 @@ def write_epub(doc: Document, xml_root: etree._Element, out_dir: Path, path: Pat
     xhtml = transform(xml_root, "canonical-to-xhtml.xsl", {"css": "styles.css"})
 
     assets = sorted({b.image for b in iter_blocks(doc.body)
-                     if isinstance(b, Figure) and b.image and (out_dir / b.image).exists()})
+                     if isinstance(b, Figure | Formula) and b.image
+                     and (out_dir / b.image).exists()})
 
     with zipfile.ZipFile(path, "w") as z:
         _write(z, "mimetype", "application/epub+zip", stored=True)   # must be first, uncompressed
